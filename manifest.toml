@@ -4,7 +4,7 @@ id = "affine"
 name = "AFFiNE"
 description.fr = "Espace de travail open-source (docs + tableau blanc)."
 description.en = "Open-source workspace (docs + whiteboard)."
-version = "0.2.0~ynh1"
+version = "0.1.0~ynh1"
 
 maintainers = ["EpicTGuy <github@users.noreply.github.com>"]
 

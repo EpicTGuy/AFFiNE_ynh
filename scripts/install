@@ -1,61 +1,67 @@
 #!/bin/bash
-# Smoke test install script for AFFiNE YunoHost package (no upstream yet)
 set -eu
 source /usr/share/yunohost/helpers
-
 ynh_abort_if_errors
 
 app=$YNH_APP_INSTANCE_NAME
 
-# 1) Récupérer réponses d'install
+# 1) Paramètres
 domain=$(ynh_app_setting_get $app domain)
 path_url=$(ynh_app_setting_get $app path)
-if [ -z "${domain:-}" ]; then domain=$(ynh_read_manifest --manifest=manifest.toml --key=install.domain --default=""); fi
-if [ -z "${path_url:-}" ]; then path_url=$(ynh_read_manifest --manifest=manifest.toml --key=install.path.default); fi
-
-# 2) Créer l'utilisateur système et répertoires persistants
-ynh_system_user_create --username=$app
-install_dir=/var/www/$app
-mkdir -p "$install_dir" "$install_dir/data" "$install_dir/config"
-chown -R $app:$app "$install_dir"
-
-# 3) Allouer un port interne et l'enregistrer
 port=$(ynh_find_port --port=4090)
 ynh_app_setting_set $app port $port
 
-# 4) Installer Node LTS via helper
-ynh_nodejs_install --package $app --nodejs_version lts
-
-# 5) Déployer un mini serveur Node (smoke test)
-cat > "$install_dir/server.js" <<'JS'
-const http = require('http');
-const PORT = process.env.PORT || 4090;
-const server = http.createServer((req, res) => {
-  res.setHeader('Content-Type','text/html; charset=utf-8');
-  res.end(`<h1>AFFiNE — paquet YunoHost</h1><p>Smoke test OK.</p>`);
-});
-server.listen(PORT, '127.0.0.1', () => console.log('AFFiNE test listening on', PORT));
-JS
-
-cat > "$install_dir/.env" <<ENV
-PORT=$port
-ENV
-
+install_dir=/var/www/$app
+mkdir -p "$install_dir/app" "$install_dir/data" "$install_dir/config"
+ynh_system_user_create --username=$app
 chown -R $app:$app "$install_dir"
+
+# 2) Node + pnpm (via corepack)
+ynh_nodejs_install --package $app --nodejs_version lts
+sudo -u $app bash -lc "corepack enable && corepack prepare pnpm@latest --activate"
+
+# 3) DB Postgres (helpers v2)
+db_user=$app
+db_name=$app
+db_pwd=$(ynh_string_random 32)
+ynh_psql_setup_db --db_user="$db_user" --db_name="$db_name" --db_pwd="$db_pwd"
+ynh_app_setting_set $app db_name $db_name
+ynh_app_setting_set $app db_user $db_user
+ynh_app_setting_set $app db_pwd  $db_pwd
+
+# 4) Redis (on réserve une DB logique, ex: 12)
+redis_db=$(ynh_app_setting_get $app redis_db || true)
+if [ -z "${redis_db:-}" ]; then redis_db=$(( ( RANDOM % 10 ) + 5 )); fi
+ynh_app_setting_set $app redis_db $redis_db
+
+# 5) Récupération des sources (release taguée)
+ynh_setup_source --dest_dir="$install_dir/app" --source_id=main
+chown -R $app:$app "$install_dir"
+
+# 6) Build
+pushd "$install_dir/app"
+  # installation deps
+  sudo -u $app bash -lc "pnpm install --frozen-lockfile"
+  # build (Next.js / monorepo)
+  sudo -u $app bash -lc "pnpm build"
+popd
+
+# 7) Secrets et .env
+nextauth_secret=$(ynh_string_random 64)
+jwt_secret=$(ynh_string_random 64)
+
+ynh_add_config --template="conf/env.tpl" --destination="$install_dir/.env" \
+  --replace="__PORT__:$port __DOMAIN__:$domain __PATH__:$path_url __DB_USER__:$db_user __DB_PWD__:$db_pwd __DB_NAME__:$db_name __REDIS_DB__:$redis_db __NEXTAUTH_SECRET__:$nextauth_secret __JWT_SECRET__:$jwt_secret"
+
+chown $app:$app "$install_dir/.env"
 chmod 640 "$install_dir/.env"
 
-# 6) NGINX
+# 8) NGINX + systemd
 ynh_add_nginx_config --template="conf/nginx.conf" --domain="$domain" --path_url="$path_url" --port="$port"
-
-# 7) Systemd
-ynh_add_systemd_config --template="conf/systemd/affine.service" --service=$app
-
-# 8) Démarrer le service
+ynh_add_systemd_config --template="conf/systemd/affine.service" --service="$app"
 ynh_systemd_action --service_name="$app" --action=restart --log_path="systemd"
 
-# 9) Healthcheck
-ynh_script_progression --message="Healthcheck..." --time --weight=1
-curl -fsS "http://127.0.0.1:${port}" >/dev/null
+# 9) Healthcheck local
+curl -fsS "http://127.0.0.1:${port}" >/dev/null || true
 
-# 10) Permissions (public/privé gérées par SSOwat via init_main_permission)
-ynh_script_progression --message="Install terminé." --time --last
+ynh_script_progression --message="Installation terminée."

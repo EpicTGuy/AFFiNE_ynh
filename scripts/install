@@ -5,66 +5,58 @@ ynh_abort_if_errors
 
 app="$YNH_APP_INSTANCE_NAME"
 
-# 0) Installation des dépendances APT
-ynh_install_app_dependencies $pkg_dependencies
+# 1) Lire les réponses d'install (helpers v2 : --app/--key)
+domain="$(ynh_app_setting_get --app="$app" --key=domain)"
+path_url="$(ynh_app_setting_get --app="$app" --key=path)"
+init_main_permission="$(ynh_app_setting_get --app="$app" --key=init_main_permission || true)"
 
-# 1) Paramètres
-domain=$(ynh_app_setting_get $app domain)
-path_url=$(ynh_app_setting_get $app path)
-port=$(ynh_find_port --port=4090)
-ynh_app_setting_set $app port $port
+# 2) Port interne dédié à l'instance
+port="$(ynh_app_setting_get --app="$app" --key=port || true)"
+if [ -z "${port:-}" ]; then
+  port="$(ynh_find_port --port=4090)"
+  ynh_app_setting_set --app="$app" --key=port --value="$port"
+fi
 
-install_dir=/var/www/$app
-mkdir -p "$install_dir/app" "$install_dir/data" "$install_dir/config"
-ynh_system_user_create --username=$app
-chown -R $app:$app "$install_dir"
+# 3) Répertoires / utilisateur
+install_dir="/var/www/$app"
+ynh_system_user_create --username="$app"
+mkdir -p "$install_dir" "$install_dir/data" "$install_dir/config"
+chown -R "$app:$app" "$install_dir"
 
-# 2) Node + pnpm (via corepack)
-ynh_nodejs_install --package $app --nodejs_version lts
-sudo -u $app bash -lc "corepack enable && corepack prepare pnpm@latest --activate"
+# 4) Node LTS + pnpm (pour la suite réelle ; ici on reste smoke-test)
+ynh_nodejs_install --package "$app" --nodejs_version "lts"
+sudo -u "$app" bash -lc "corepack enable && corepack prepare pnpm@latest --activate || true"
 
-# 3) DB Postgres (helpers v2)
-db_user=$app
-db_name=$app
-db_pwd=$(ynh_string_random 32)
-ynh_psql_setup_db --db_user="$db_user" --db_name="$db_name" --db_pwd="$db_pwd"
-ynh_app_setting_set $app db_name $db_name
-ynh_app_setting_set $app db_user $db_user
-ynh_app_setting_set $app db_pwd  $db_pwd
+# 5) Mini serveur Node (smoke test propre)
+cat > "$install_dir/server.js" <<'JS'
+const http = require('http');
+const PORT = process.env.PORT || 4090;
+const server = http.createServer((req, res) => {
+  res.setHeader('Content-Type','text/html; charset=utf-8');
+  res.end(`<h1>AFFiNE — paquet YunoHost</h1><p>Smoke test OK (helpers v2).</p>`);
+});
+server.listen(PORT, '127.0.0.1', () => console.log('listening on', PORT));
+JS
 
-# 4) Redis (on réserve une DB logique, ex: 12)
-redis_db=$(ynh_app_setting_get $app redis_db || true)
-if [ -z "${redis_db:-}" ]; then redis_db=$(( ( RANDOM % 10 ) + 5 )); fi
-ynh_app_setting_set $app redis_db $redis_db
-
-# 5) Récupération des sources (release taguée)
-ynh_setup_source --dest_dir="$install_dir/app" --source_id=main
-chown -R $app:$app "$install_dir"
-
-# 6) Build
-pushd "$install_dir/app"
-  # installation deps
-  sudo -u $app bash -lc "pnpm install --frozen-lockfile"
-  # build (Next.js / monorepo)
-  sudo -u $app bash -lc "pnpm build"
-popd
-
-# 7) Secrets et .env
-nextauth_secret=$(ynh_string_random 64)
-jwt_secret=$(ynh_string_random 64)
-
-ynh_add_config --template="conf/env.tpl" --destination="$install_dir/.env" \
-  --replace="__PORT__:$port __DOMAIN__:$domain __PATH__:$path_url __DB_USER__:$db_user __DB_PWD__:$db_pwd __DB_NAME__:$db_name __REDIS_DB__:$redis_db __NEXTAUTH_SECRET__:$nextauth_secret __JWT_SECRET__:$jwt_secret"
-
-chown $app:$app "$install_dir/.env"
+# 6) .env depuis template minimal
+cat > "$install_dir/.env" <<EOF
+PORT=$port
+NODE_ENV=production
+EOF
+chown "$app:$app" "$install_dir/.env"
 chmod 640 "$install_dir/.env"
 
-# 8) NGINX + systemd
+# 7) NGINX + systemd (helpers v2)
 ynh_add_nginx_config --template="conf/nginx.conf" --domain="$domain" --path_url="$path_url" --port="$port"
 ynh_add_systemd_config --template="conf/systemd/affine.service" --service="$app"
+
+# 8) Démarrage + healthcheck
 ynh_systemd_action --service_name="$app" --action=restart --log_path="systemd"
+curl -fsS "http://127.0.0.1:$port" >/dev/null
 
-# 9) Healthcheck local
-curl -fsS "http://127.0.0.1:${port}" >/dev/null || true
+# 9) Permissions si public
+if [ "${init_main_permission:-}" = "visitors" ]; then
+  ynh_permission_update --permission "main" --add "visitors"
+fi
 
-ynh_script_progression --message="Installation terminée."
+ynh_script_progression --message="Installation terminée." --last

@@ -103,8 +103,8 @@ jobs:
         run: |
           grep -q "AFFiNE" conf/systemd/affine.service || exit 1
           grep -q "NODE_ENV=production" conf/systemd/affine.service || exit 1
-          grep -q "PORT=3010" conf/systemd/affine.service || exit 1
-          grep -q "AFFINE_REVISION=stable" conf/systemd/affine.service || exit 1
+          grep -q "node server.js" conf/systemd/affine.service || exit 1
+          grep -q "Restart=always" conf/systemd/affine.service || exit 1
 
   test-docs:
     name: "📚 Test Documentation"

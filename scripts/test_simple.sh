@@ -137,10 +137,10 @@ else
     exit 1
 fi
 
-if grep -q "PORT=3010" conf/systemd/affine.service; then
-    log_success "✅ Port AFFiNE correct (3010)"
+if grep -q "node server.js" conf/systemd/affine.service; then
+    log_success "✅ Entrypoint Node.js correct"
 else
-    log_error "❌ Port AFFiNE incorrect"
+    log_error "❌ Entrypoint Node.js incorrect"
     exit 1
 fi
 

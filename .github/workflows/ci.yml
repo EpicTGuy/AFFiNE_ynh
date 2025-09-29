@@ -307,3 +307,4 @@ jobs:
           echo "✅ CI terminée avec succès"
           echo "🏆 Niveau YunoHost: ${{ needs.calculate-level.outputs.level }}"
 # CI AFFiNE YunoHost - Dernière mise à jour: lun. 29 sept. 2025 21:20:32 CEST
+# Force update CI workflow

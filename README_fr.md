@@ -1,33 +1,17 @@
-# Emballage d'une application, à partir de cet exemple
+# AFFiNE - Package YunoHost
 
-* Copier cette application avant de travailler dessus, en utilisant le bouton ['Use this template'](https://github.com/new?template_name=example_ynh&template_owner=YunoHost) sur le repo GitHub.
-* Editer le fichier `manifest.toml` avec les informations spécifiques à l'application.
-* Editer les scripts `install`, `upgrade`, `remove`, `backup` et `restore`, et tous les fichiers de conf pertinents dans `conf/`.
-  * Utiliser la [documentation sur les aides aux scripts] (https://yunohost.org/packaging_apps_helpers).
-* Éditez aussi les scripts `change_url` et `config`, ou supprimez-les si vous n'en avez pas l'utilité.
-* Ajouter un fichier `LICENSE` pour le paquet. NB : ce fichier LICENSE n'est pas nécessairement la LICENSE de l'application en amont - c'est seulement la LICENSE avec laquelle vous voulez que le code de ce paquet soit publié ;). Nous recommandons d'utiliser [l'AGPL-3] (https://www.gnu.org/licenses/agpl-3.0.txt).
-* Editer les fichiers dans le répertoire `doc/`.
-* Les fichiers `README.md` doivent être générés automatiquement par <https://github.com/YunoHost/apps/tree/main/tools/readme_generator>
+[![CI](https://github.com/EpicTGuy/AFFiNE_ynh/workflows/CI%20AFFiNE%20YunoHost/badge.svg)](https://github.com/EpicTGuy/AFFiNE_ynh/actions)
+[![Niveau YunoHost](https://img.shields.io/badge/YunoHost-Niveau%206+-green)](https://github.com/EpicTGuy/AFFiNE_ynh/actions)
+[![Shellcheck](https://github.com/EpicTGuy/AFFiNE_ynh/workflows/CI%20AFFiNE%20YunoHost/badge.svg?label=shellcheck)](https://github.com/EpicTGuy/AFFiNE_ynh/actions)
 
----
-<!--
-N.B. : Ce README a été généré automatiquement par https://github.com/YunoHost/apps/tree/main/tools/readme_generator
-Il ne doit PAS être édité à la main.
--->
+*[Lire ce README en anglais.](./README.md)*
 
-# Exemple d'app pour YunoHost
-
-[![Niveau d'intégration](https://dash.yunohost.org/integration/example.svg)](https://dash.yunohost.org/appci/app/example) ![Statut du fonctionnement](https://ci-apps.yunohost.org/ci/badges/example.status.svg) ![Statut de maintenance](https://ci-apps.yunohost.org/ci/badges/example.maintain.svg)  
-[![Installer Example app avec YunoHost](https://install-app.yunohost.org/install-with-yunohost.svg)](https://install-app.yunohost.org/?app=example)
-
-*[Read this readme in english.](./README.md)*
-
-> *Ce package vous permet d'installer Example app rapidement et simplement sur un serveur YunoHost.
+> *Ce package vous permet d'installer AFFiNE rapidement et simplement sur un serveur YunoHost.
 Si vous n'avez pas YunoHost, regardez [ici](https://yunohost.org/#/install) pour savoir comment l'installer et en profiter.*
 
 ## Vue d'ensemble
 
-Some long and extensive description of what the app is and does, lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+AFFiNE est un workspace open-source auto-hébergeable qui combine documentation collaborative, whiteboard et gestion de projet. Ce package YunoHost permet d'installer facilement AFFiNE sur votre serveur YunoHost avec une configuration automatique complète.
 
 ### Features
 

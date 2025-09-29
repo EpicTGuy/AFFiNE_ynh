@@ -1,8 +1,8 @@
 # Affine YunoHost Package
 
-[![CI](https://github.com/username/affine_ynh/workflows/CI%20AFFiNE%20YunoHost/badge.svg)](https://github.com/username/affine_ynh/actions)
-[![Niveau YunoHost](https://img.shields.io/badge/YunoHost-Niveau%20$LEVEL-green)](https://github.com/username/affine_ynh/actions)
-[![Shellcheck](https://github.com/username/affine_ynh/workflows/CI%20AFFiNE%20YunoHost/badge.svg?label=shellcheck)](https://github.com/username/affine_ynh/actions)
+[![CI](https://github.com/EpicTGuy/AFFiNE_ynh/workflows/CI%20AFFiNE%20YunoHost/badge.svg)](https://github.com/EpicTGuy/AFFiNE_ynh/actions)
+[![Niveau YunoHost](https://img.shields.io/badge/YunoHost-Niveau%206+-green)](https://github.com/EpicTGuy/AFFiNE_ynh/actions)
+[![Shellcheck](https://github.com/EpicTGuy/AFFiNE_ynh/workflows/CI%20AFFiNE%20YunoHost/badge.svg?label=shellcheck)](https://github.com/EpicTGuy/AFFiNE_ynh/actions)
 
 ## Vue d'ensemble
 

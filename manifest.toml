@@ -2,15 +2,19 @@ packaging_format = 2
 
 id = "affine"
 name = "AFFiNE"
-description.fr = "Espace de travail open-source (docs + whiteboard), paquet YunoHost (brouillon de test)."
-description.en = "Open-source workspace (docs + whiteboard), YunoHost package (smoke test)."
-version = "0.0.1~ynh1"
+description.fr = "Espace de travail open-source (docs + tableau blanc)."
+description.en = "Open-source workspace (docs + whiteboard)."
+version = "0.2.0~ynh1"
 
 maintainers = ["EpicTGuy <github@users.noreply.github.com>"]
 
 [upstream]
 license = "MIT"
 code = "https://github.com/toeverything/AFFiNE"
+
+architectures = ["amd64", "arm64"]
+multi_instance = true
+services = ["affine"]
 
 [install]
   [install.domain]
@@ -21,14 +25,10 @@ code = "https://github.com/toeverything/AFFiNE"
   [install.path]
   type = "path"
   default = "/affine"
-  ask.fr = "Choisissez un chemin"
-  ask.en = "Choose a path"
 
   [install.init_main_permission]
   type = "group"
-  default = "visitors" # public pour le test
-  ask.fr = "Qui peut accéder à l'application ? (visitors ou all_users)"
-  ask.en = "Who can access the app? (visitors or all_users)"
+  default = "visitors"
 
 [resources]
   [resources.system_user]
@@ -38,7 +38,15 @@ code = "https://github.com/toeverything/AFFiNE"
     [resources.ports.main]
     default = 4090
 
+  [resources.databases]
+    [resources.databases.main]
+    type = "postgresql"
+
   [resources.data]
   paths = ["data", "config"]
 
-  # On laissera les sources vides pour le smoke test ; on générera un mini serveur côté install
+  [resources.sources.main]
+  # ← épingle un tag AFFiNE ci-dessous et mets le sha256 correspondant
+  url = "https://github.com/toeverything/AFFiNE/archive/refs/tags/v0.XX.Y.tar.gz"
+  sha256 = "TO_FILL"
+  in_subdir = true

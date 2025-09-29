@@ -12,11 +12,12 @@ ynh_remove_systemd_config --service="$app"
 # Remove NGINX
 ynh_remove_nginx_config
 
-# Option : conserver /var/www/$app (données) pour sécurité
-# ynh_secure_remove --file="/var/www/$app"  # décommente si tu veux supprimer
-
 # Remove Node runtime
 ynh_nodejs_remove --package "$app"
 
 # Remove user
 ynh_system_user_delete --username="$app"
+
+# Note: /var/www/$app est conservé par défaut pour sécurité
+# Décommente la ligne suivante si tu veux supprimer les données :
+# ynh_secure_remove --file="/var/www/$app"

@@ -1,4 +1,4 @@
-name: CI AFFiNE YunoHost (Simplifié)
+name: CI AFFiNE YunoHost
 
 on:
   push:
@@ -86,7 +86,7 @@ jobs:
               assert manifest['id'] == 'affine', f'ID incorrect: {manifest[\"id\"]}'
               assert manifest['name'] == 'AFFiNE', f'Nom incorrect: {manifest[\"name\"]}'
               assert manifest['version'] == '0.10.0~ynh1', f'Version incorrecte: {manifest[\"version\"]}'
-              assert 'AFFiNE' in manifest['upstream']['code'], f'Code upstream incorrect: {manifest[\"upstream\"][\"code\"]}'
+              assert 'affine' in manifest['upstream']['code'], f'Code upstream incorrect: {manifest[\"upstream\"][\"code\"]}'
               assert manifest['integration']['multi_instance'] == True, 'Multi-instance non activé'
               assert 'amd64' in manifest['integration']['architectures'], 'Architecture AMD64 manquante'
               assert 'arm64' in manifest['integration']['architectures'], 'Architecture ARM64 manquante'

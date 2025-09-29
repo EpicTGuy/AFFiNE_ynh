@@ -1,0 +1,21 @@
+Fichier,Priorité,Dépendances,Tests,Description
+manifest.toml,Haute,Aucune,test_manifest.sh,Manifeste v2 YunoHost avec métadonnées complètes
+conf/nginx.conf,Haute,manifest.toml,test_nginx.sh,Configuration NGINX avec reverse proxy et IPv6
+conf/systemd/affine.service,Haute,manifest.toml,test_systemd.sh,Service systemd pour AFFiNE
+scripts/install,Haute,manifest.toml,test_install.sh,Script d'installation principal
+scripts/upgrade,Moyenne,scripts/install,test_upgrade.sh,Script de mise à jour avec migration
+scripts/remove,Haute,scripts/install,test_remove.sh,Script de suppression propre
+scripts/backup,Moyenne,scripts/install,test_backup.sh,Script de sauvegarde complète
+scripts/restore,Moyenne,scripts/backup,test_restore.sh,Script de restauration complète
+sources/affine-v0.10.0.tar.gz,Haute,Aucune,test_sources.sh,Tarball AFFiNE avec checksum
+tests/test_install.sh,Haute,scripts/install,test_tests.sh,Tests d'installation automatisés
+tests/test_functionality.sh,Moyenne,scripts/install,test_tests.sh,Tests de fonctionnalité HTTP/WebSocket
+tests/test_backup_restore.sh,Moyenne,scripts/backup,test_tests.sh,Tests de sauvegarde et restauration
+tests/test_multi_instance.sh,Basse,scripts/install,test_tests.sh,Tests de multi-instance
+doc/README.md,Moyenne,scripts/install,test_doc.sh,Documentation utilisateur
+doc/CHANGELOG.md,Basse,manifest.toml,test_doc.sh,Journal des modifications
+doc/API.md,Basse,scripts/install,test_doc.sh,Documentation API
+CI/.github/workflows/test.yml,Haute,tests/,test_ci.sh,Configuration CI/CD GitHub Actions
+CI/.github/workflows/deploy.yml,Moyenne,CI/.github/workflows/test.yml,test_ci.sh,Workflow de déploiement
+CI/.github/workflows/security.yml,Moyenne,scripts/,test_ci.sh,Workflow de sécurité
+CI/.github/workflows/performance.yml,Basse,scripts/,test_ci.sh,Workflow de performance

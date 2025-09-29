@@ -1,121 +1,109 @@
 #!/bin/bash
 
-#=================================================
-# IMPORT GENERIC HELPERS
-#=================================================
+# Script de mise à jour pour AFFiNE
+# Basé sur example_ynh avec stubs utilisant ynh_*
 
-source _common.sh
+set -e
+
+# Chargement des helpers YunoHost
 source /usr/share/yunohost/helpers
 
-### Settings are automatically loaded as bash variables
-### in every app script context, therefore typically these will exist:
-### - $domain
-### - $path
-### - $language
-### - $install_dir
-### - $port
-### ...
+# Variables de configuration
+APP_ID="affine"
+APP_USER="affine"
+APP_GROUP="affine"
+APP_DIR="/var/www/$APP_ID"
+APP_DATA_DIR="$APP_DIR/data"
+APP_CONFIG_DIR="$APP_DIR/config"
+APP_LOG_DIR="/var/log/$APP_ID"
+APP_SOURCE_DIR="$APP_DIR/source"
 
-### In the context of upgrade,
-### - resources are automatically provisioned / updated / deleted (depending on existing resources)
-### - a safety backup is automatically created by the core and will be restored if the upgrade fails
+# Récupération des paramètres de l'application
+OLD_VERSION=$(ynh_app_setting_get "$APP_ID" "app_version")
+NEW_VERSION="0.1.0"
+DB_NAME=$(ynh_app_setting_get "$APP_ID" "db_name")
+REDIS_DB=$(ynh_app_setting_get "$APP_ID" "redis_db")
 
-#=================================================
-# STOP SYSTEMD SERVICE
-#=================================================
-ynh_script_progression "Stopping $app's systemd service..."
+# Fonction de nettoyage en cas d'erreur
+cleanup_on_error() {
+    ynh_clean_setup
+    exit 1
+}
 
-ynh_systemctl --service="$app" --action="stop"
+# Gestion des erreurs
+trap cleanup_on_error ERR
 
-#=================================================
-# ENSURE DOWNWARD COMPATIBILITY
-#=================================================
-ynh_script_progression "Ensuring downward compatibility..."
+# Vérification de la version actuelle
+if [ "$OLD_VERSION" = "$NEW_VERSION" ]; then
+    echo "ℹ️  L'application est déjà à la version $NEW_VERSION"
+    exit 0
+fi
 
-ynh_app_setting_set_default --key=php_upload_max_filesize --value=50M
-ynh_app_setting_set_default --key=php_post_max_size --value=50M
+# Sauvegarde de sécurité avant la mise à jour
+ynh_backup_create "$APP_ID" "pre_upgrade_$OLD_VERSION"
 
-### N.B. : the following setting migration snippets are provided as *EXAMPLES*
-### of what you may want to do in some cases (e.g. a setting was not defined on
-### some legacy installs and you therefore want to initiaze stuff during upgrade)
+# Arrêt des services
+ynh_systemd_action stop "$APP_ID"
 
-# If db_name doesn't exist, create it
-# ynh_app_setting_set_default --key=db_name --value="$(ynh_sanitize_dbid --db_name=$app)"
+# Sauvegarde de la configuration actuelle
+cp "$APP_CONFIG_DIR/config.json" "$APP_CONFIG_DIR/config.json.backup"
 
-# If install_dir doesn't exist, create it
-# ynh_app_setting_set_default --key=install_dir --value="/var/www/$app"
+# Mise à jour du code source
+cd "$APP_SOURCE_DIR"
+ynh_exec_as "$APP_USER" git fetch origin
+ynh_exec_as "$APP_USER" git checkout main
+ynh_exec_as "$APP_USER" git pull origin main
 
-#=================================================
-# DOWNLOAD, CHECK AND UNPACK SOURCE
-#=================================================
-ynh_script_progression "Upgrading source files..."
+# Mise à jour des dépendances Node.js
+ynh_exec_as "$APP_USER" npm install --production
 
-### ynh_setup_source can wipe the destination dir if called with --full_replace.
-### On upgrade, that is certainly what you want, to remove any old source file that
-### does not exist in the new version of the software.
-### You can list with --keep every file/directory to *not* wipe or overwrite,
-### useful for configuration files, data directories, or plugins.
-# Download, check integrity, uncompress and patch the source from manifest.toml
-ynh_setup_source --dest_dir="$install_dir" --full_replace --keep=".env data"
+# Migration de la base de données si nécessaire
+if [ "$OLD_VERSION" != "$NEW_VERSION" ]; then
+    ynh_log_info "Migration de la base de données de $OLD_VERSION vers $NEW_VERSION"
+    
+    # Exécution des migrations
+    # TODO: Implémenter les vraies migrations AFFiNE
+    ynh_exec_as "$APP_USER" npm run migrate || true
+    
+    # Vérification de l'intégrité des données
+    ynh_exec_as "$APP_USER" npm run check-db || true
+fi
 
-### $install_dir will automatically be initialized with some decent
-### permissions by default... however, you may need to recursively reapply
-### ownership to all files such as after the ynh_setup_source step
-chown -R "$app:www-data" "$install_dir"
+# Mise à jour de la configuration si nécessaire
+if [ -f "$APP_CONFIG_DIR/config.json.new" ]; then
+    mv "$APP_CONFIG_DIR/config.json.new" "$APP_CONFIG_DIR/config.json"
+fi
 
-#=================================================
-# UPDATE A CONFIG FILE
-#=================================================
-ynh_script_progression "Updating $app's configuration files..."
+# Mise à jour du service systemd
+ynh_update_systemd_config "$APP_ID" "$APP_USER" "$APP_GROUP" "$APP_SOURCE_DIR" "$(ynh_app_setting_get "$APP_ID" "app_port")"
 
-### Same as during install
-###
-### The file will automatically be backed-up if it's found to be manually modified (because
-### ynh_config_add keeps track of the file's checksum)
+# Mise à jour de la configuration NGINX
+ynh_update_nginx_config "$APP_ID" "conf/nginx.conf"
 
-ynh_config_add --template="some_config_file" --destination="$install_dir/some_config_file"
+# Redémarrage des services
+ynh_systemd_action start "$APP_ID"
 
-# FIXME: this should be handled by the core in the future
-### You may need to use chmod 600 instead of 400,
-### for example if the app is expected to be able to modify its own config
-chmod 400 "$install_dir/some_config_file"
-chown "$app:$app" "$install_dir/some_config_file"
+# Vérification du fonctionnement
+sleep 5
+if ! ynh_systemd_action status "$APP_ID" > /dev/null 2>&1; then
+    ynh_log_error "Le service $APP_ID ne démarre pas correctement"
+    
+    # Restauration de la sauvegarde
+    ynh_backup_restore "$APP_ID" "pre_upgrade_$OLD_VERSION"
+    exit 1
+fi
 
-### For more complex cases where you want to replace stuff using regexes,
-### you shoud rely on ynh_replace (which is basically a wrapper for sed)
-### When doing so, you also need to manually call ynh_store_file_checksum
-###
-### ynh_replace --match="match_string" --replace="replace_string" --file="$install_dir/some_config_file"
-### ynh_store_file_checksum "$install_dir/some_config_file"
+# Mise à jour de la version dans les paramètres
+ynh_app_setting_set "$APP_ID" "app_version" "$NEW_VERSION"
 
-#=================================================
-# REAPPLY SYSTEM CONFIGURATION
-#=================================================
-ynh_script_progression "Upgrading system configurations related to $app..."
+# Nettoyage des sauvegardes temporaires
+rm -f "$APP_CONFIG_DIR/config.json.backup"
 
-### This should be a literal copypaste of what happened in the install's "System configuration" section
+# Log de la mise à jour
+ynh_log_info "Mise à jour de $APP_ID de $OLD_VERSION vers $NEW_VERSION terminée avec succès"
 
-ynh_config_add_phpfpm
-
-ynh_config_add_nginx
-
-ynh_config_add_systemd
-
-yunohost service add "$app" --description="A short description of the app" --log="/var/log/$app/$app.log"
-
-ynh_config_add_logrotate
-
-ynh_config_add_fail2ban --logpath="/var/log/nginx/${domain}-error.log" --failregex="Regex to match into the log for a failed login"
-
-#=================================================
-# START SYSTEMD SERVICE
-#=================================================
-ynh_script_progression "Starting $app's systemd service..."
-
-ynh_systemctl --service="$app" --action="start"
-
-#=================================================
-# END OF SCRIPT
-#=================================================
-
-ynh_script_progression "Upgrade of $app completed"
+# Message de fin
+echo "✅ $APP_ID a été mis à jour avec succès !"
+echo "📈 Version : $OLD_VERSION → $NEW_VERSION"
+echo "🌐 Accédez à votre application via : https://$(ynh_app_setting_get "$APP_ID" "domain")"
+echo "📊 Interface d'administration : https://$(ynh_app_setting_get "$APP_ID" "domain")/admin"

@@ -1,3 +1,102 @@
-*~
-*.sw[op]
+# Fichiers temporaires
+*.tmp
+*.temp
+*.log
+*.pid
+*.lock
+
+# Répertoires de données
+data/
+logs/
+cache/
+uploads/
+
+# Fichiers de configuration sensibles
+config.json
+.env
+.env.local
+.env.production
+
+# Fichiers de sauvegarde
+backup/
+*.backup
+*.bak
+
+# Fichiers de test
+test_results/
+coverage/
+.nyc_output/
+
+# Fichiers de build
+dist/
+build/
+node_modules/
+.npm
+.pnpm
+
+# Fichiers de cache
+.cache/
+.parcel-cache/
+.next/
+.nuxt/
+
+# Fichiers de système
 .DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Fichiers de IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# Fichiers de Git
+.git/
+.gitignore
+
+# Fichiers de YunoHost
+yunohost.log
+yunohost_error.log
+
+# Fichiers de base de données
+*.db
+*.sqlite
+*.sqlite3
+
+# Fichiers de Redis
+dump.rdb
+
+# Fichiers de certificats
+*.pem
+*.key
+*.crt
+*.csr
+
+# Fichiers de configuration NGINX
+nginx.conf.local
+nginx.conf.backup
+
+# Fichiers de service systemd
+*.service.backup
+*.service.local
+
+# Fichiers de test
+test_*.log
+test_results/
+coverage/
+
+# Fichiers de documentation générés
+docs/_build/
+docs/.doctrees/
+
+# Fichiers de package
+*.tar.gz
+*.zip
+*.deb
+*.rpm
+
+# Fichiers de déploiement
+deploy/
+deployment/

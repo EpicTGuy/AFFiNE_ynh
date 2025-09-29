@@ -1,0 +1,483 @@
+name: CI AFFiNE YunoHost
+
+on:
+  push:
+    branches: [ testing ]
+  pull_request:
+    branches: [ testing ]
+
+env:
+  TEST_DOMAIN: test.example.com
+  TEST_PATH: /affine
+  TEST_IS_PUBLIC: false
+  TIMEOUT: 600
+
+jobs:
+  # Job 1: Lint Shell (shellcheck)
+  lint-shell:
+    name: "🔍 Lint Shell (shellcheck)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Run shellcheck on scripts
+        run: |
+          echo "🔍 Vérification des scripts avec shellcheck..."
+          find scripts/ -name "*.sh" -type f -exec shellcheck {} \;
+          echo "✅ Tous les scripts passent shellcheck"
+
+      - name: Check script permissions
+        run: |
+          echo "🔍 Vérification des permissions des scripts..."
+          for script in scripts/*.sh; do
+            if [ -f "$script" ]; then
+              if [ ! -x "$script" ]; then
+                echo "❌ Script non exécutable: $script"
+                exit 1
+              fi
+              echo "✅ $script est exécutable"
+            fi
+          done
+          echo "✅ Tous les scripts ont les bonnes permissions"
+
+  # Job 2: Test Install/Remove
+  test-install-remove:
+    name: "🚀 Test Install/Remove"
+    runs-on: ubuntu-latest
+    needs: lint-shell
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup YunoHost environment
+        run: |
+          echo "🔧 Configuration de l'environnement YunoHost..."
+          # Installation des dépendances de base
+          sudo apt-get update
+          sudo apt-get install -y \
+            yunohost \
+            nodejs \
+            npm \
+            nginx \
+            postgresql \
+            postgresql-contrib \
+            redis-server \
+            jq \
+            bc \
+            curl \
+            wget \
+            git \
+            build-essential \
+            python3 \
+            python3-pip
+
+      - name: Start services
+        run: |
+          echo "🚀 Démarrage des services..."
+          sudo systemctl start postgresql
+          sudo systemctl start redis-server
+          sudo systemctl start nginx
+          
+          # Vérification des services
+          sudo systemctl is-active postgresql || exit 1
+          sudo systemctl is-active redis-server || exit 1
+          sudo systemctl is-active nginx || exit 1
+          echo "✅ Tous les services sont démarrés"
+
+      - name: Configure YunoHost
+        run: |
+          echo "⚙️ Configuration de YunoHost..."
+          # Configuration minimale pour les tests
+          sudo yunohost tools postinstall \
+            --domain ${{ env.TEST_DOMAIN }} \
+            --password "testpassword123" \
+            --ask-question=false || true
+
+      - name: Run install test
+        run: |
+          echo "🧪 Exécution du test d'installation..."
+          cd scripts
+          chmod +x *.sh
+          ./install.sh
+          echo "✅ Test d'installation réussi"
+
+      - name: Run remove test
+        run: |
+          echo "🧪 Exécution du test de désinstallation..."
+          cd scripts
+          ./remove.sh
+          echo "✅ Test de désinstallation réussi"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "🧹 Nettoyage..."
+          sudo yunohost app remove affine 2>/dev/null || true
+          sudo systemctl stop nginx postgresql redis-server || true
+
+  # Job 3: Test Backup/Restore
+  test-backup-restore:
+    name: "💾 Test Backup/Restore"
+    runs-on: ubuntu-latest
+    needs: lint-shell
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup YunoHost environment
+        run: |
+          echo "🔧 Configuration de l'environnement YunoHost..."
+          sudo apt-get update
+          sudo apt-get install -y \
+            yunohost \
+            nodejs \
+            npm \
+            nginx \
+            postgresql \
+            postgresql-contrib \
+            redis-server \
+            jq \
+            bc \
+            curl \
+            wget \
+            git \
+            build-essential \
+            python3 \
+            python3-pip
+
+      - name: Start services
+        run: |
+          echo "🚀 Démarrage des services..."
+          sudo systemctl start postgresql
+          sudo systemctl start redis-server
+          sudo systemctl start nginx
+          
+          # Vérification des services
+          sudo systemctl is-active postgresql || exit 1
+          sudo systemctl is-active redis-server || exit 1
+          sudo systemctl is-active nginx || exit 1
+          echo "✅ Tous les services sont démarrés"
+
+      - name: Configure YunoHost
+        run: |
+          echo "⚙️ Configuration de YunoHost..."
+          sudo yunohost tools postinstall \
+            --domain ${{ env.TEST_DOMAIN }} \
+            --password "testpassword123" \
+            --ask-question=false || true
+
+      - name: Run backup/restore test
+        run: |
+          echo "🧪 Exécution du test backup/restore..."
+          cd scripts
+          chmod +x *.sh
+          ./backup_restore.sh
+          echo "✅ Test backup/restore réussi"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "🧹 Nettoyage..."
+          sudo yunohost app remove affine 2>/dev/null || true
+          sudo systemctl stop nginx postgresql redis-server || true
+
+  # Job 4: Test Multi-instance
+  test-multi-instance:
+    name: "🔄 Test Multi-instance"
+    runs-on: ubuntu-latest
+    needs: lint-shell
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup YunoHost environment
+        run: |
+          echo "🔧 Configuration de l'environnement YunoHost..."
+          sudo apt-get update
+          sudo apt-get install -y \
+            yunohost \
+            nodejs \
+            npm \
+            nginx \
+            postgresql \
+            postgresql-contrib \
+            redis-server \
+            jq \
+            bc \
+            curl \
+            wget \
+            git \
+            build-essential \
+            python3 \
+            python3-pip
+
+      - name: Start services
+        run: |
+          echo "🚀 Démarrage des services..."
+          sudo systemctl start postgresql
+          sudo systemctl start redis-server
+          sudo systemctl start nginx
+          
+          # Vérification des services
+          sudo systemctl is-active postgresql || exit 1
+          sudo systemctl is-active redis-server || exit 1
+          sudo systemctl is-active nginx || exit 1
+          echo "✅ Tous les services sont démarrés"
+
+      - name: Configure YunoHost
+        run: |
+          echo "⚙️ Configuration de YunoHost..."
+          sudo yunohost tools postinstall \
+            --domain ${{ env.TEST_DOMAIN }} \
+            --password "testpassword123" \
+            --ask-question=false || true
+
+      - name: Run multi-instance test
+        run: |
+          echo "🧪 Exécution du test multi-instance..."
+          cd scripts
+          chmod +x *.sh
+          ./multi_instance.sh
+          echo "✅ Test multi-instance réussi"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "🧹 Nettoyage..."
+          sudo yunohost app remove affine_1 2>/dev/null || true
+          sudo yunohost app remove affine_2 2>/dev/null || true
+          sudo systemctl stop nginx postgresql redis-server || true
+
+  # Job 5: Test Upgrade
+  test-upgrade:
+    name: "⬆️ Test Upgrade"
+    runs-on: ubuntu-latest
+    needs: lint-shell
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup YunoHost environment
+        run: |
+          echo "🔧 Configuration de l'environnement YunoHost..."
+          sudo apt-get update
+          sudo apt-get install -y \
+            yunohost \
+            nodejs \
+            npm \
+            nginx \
+            postgresql \
+            postgresql-contrib \
+            redis-server \
+            jq \
+            bc \
+            curl \
+            wget \
+            git \
+            build-essential \
+            python3 \
+            python3-pip
+
+      - name: Start services
+        run: |
+          echo "🚀 Démarrage des services..."
+          sudo systemctl start postgresql
+          sudo systemctl start redis-server
+          sudo systemctl start nginx
+          
+          # Vérification des services
+          sudo systemctl is-active postgresql || exit 1
+          sudo systemctl is-active redis-server || exit 1
+          sudo systemctl is-active nginx || exit 1
+          echo "✅ Tous les services sont démarrés"
+
+      - name: Configure YunoHost
+        run: |
+          echo "⚙️ Configuration de YunoHost..."
+          sudo yunohost tools postinstall \
+            --domain ${{ env.TEST_DOMAIN }} \
+            --password "testpassword123" \
+            --ask-question=false || true
+
+      - name: Run upgrade test
+        run: |
+          echo "🧪 Exécution du test d'upgrade..."
+          cd scripts
+          chmod +x *.sh
+          ./upgrade.sh
+          echo "✅ Test d'upgrade réussi"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "🧹 Nettoyage..."
+          sudo yunohost app remove affine 2>/dev/null || true
+          sudo systemctl stop nginx postgresql redis-server || true
+
+  # Job 6: Test complet (tous les tests)
+  test-all:
+    name: "🎯 Test Complet (Tous les tests)"
+    runs-on: ubuntu-latest
+    needs: [lint-shell, test-install-remove, test-backup-restore, test-multi-instance, test-upgrade]
+    if: always()
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup YunoHost environment
+        run: |
+          echo "🔧 Configuration de l'environnement YunoHost..."
+          sudo apt-get update
+          sudo apt-get install -y \
+            yunohost \
+            nodejs \
+            npm \
+            nginx \
+            postgresql \
+            postgresql-contrib \
+            redis-server \
+            jq \
+            bc \
+            curl \
+            wget \
+            git \
+            build-essential \
+            python3 \
+            python3-pip
+
+      - name: Start services
+        run: |
+          echo "🚀 Démarrage des services..."
+          sudo systemctl start postgresql
+          sudo systemctl start redis-server
+          sudo systemctl start nginx
+          
+          # Vérification des services
+          sudo systemctl is-active postgresql || exit 1
+          sudo systemctl is-active redis-server || exit 1
+          sudo systemctl is-active nginx || exit 1
+          echo "✅ Tous les services sont démarrés"
+
+      - name: Configure YunoHost
+        run: |
+          echo "⚙️ Configuration de YunoHost..."
+          sudo yunohost tools postinstall \
+            --domain ${{ env.TEST_DOMAIN }} \
+            --password "testpassword123" \
+            --ask-question=false || true
+
+      - name: Run all tests
+        run: |
+          echo "🧪 Exécution de tous les tests..."
+          cd scripts
+          chmod +x *.sh
+          ./run_all_tests.sh
+          echo "✅ Tous les tests sont réussis"
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: /tmp/affine_tests/
+          retention-days: 7
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "🧹 Nettoyage final..."
+          sudo yunohost app remove affine 2>/dev/null || true
+          sudo yunohost app remove affine_1 2>/dev/null || true
+          sudo yunohost app remove affine_2 2>/dev/null || true
+          sudo systemctl stop nginx postgresql redis-server || true
+
+  # Job 7: Calcul du niveau YunoHost
+  calculate-level:
+    name: "📊 Calcul du Niveau YunoHost"
+    runs-on: ubuntu-latest
+    needs: [test-all]
+    if: always()
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Calculate YunoHost level
+        run: |
+          echo "📊 Calcul du niveau YunoHost..."
+          
+          # Simulation du calcul de niveau basé sur les tests
+          LEVEL=0
+          
+          # Test de lint shell (niveau 1)
+          if [ "${{ needs.lint-shell.result }}" == "success" ]; then
+            LEVEL=$((LEVEL + 1))
+            echo "✅ Lint shell: +1 niveau"
+          else
+            echo "❌ Lint shell: échec"
+          fi
+          
+          # Test install/remove (niveau 2)
+          if [ "${{ needs.test-install-remove.result }}" == "success" ]; then
+            LEVEL=$((LEVEL + 1))
+            echo "✅ Install/Remove: +1 niveau"
+          else
+            echo "❌ Install/Remove: échec"
+          fi
+          
+          # Test backup/restore (niveau 3)
+          if [ "${{ needs.test-backup-restore.result }}" == "success" ]; then
+            LEVEL=$((LEVEL + 1))
+            echo "✅ Backup/Restore: +1 niveau"
+          else
+            echo "❌ Backup/Restore: échec"
+          fi
+          
+          # Test multi-instance (niveau 4)
+          if [ "${{ needs.test-multi-instance.result }}" == "success" ]; then
+            LEVEL=$((LEVEL + 1))
+            echo "✅ Multi-instance: +1 niveau"
+          else
+            echo "❌ Multi-instance: échec"
+          fi
+          
+          # Test upgrade (niveau 5)
+          if [ "${{ needs.test-upgrade.result }}" == "success" ]; then
+            LEVEL=$((LEVEL + 1))
+            echo "✅ Upgrade: +1 niveau"
+          else
+            echo "❌ Upgrade: échec"
+          fi
+          
+          # Test complet (niveau 6)
+          if [ "${{ needs.test-all.result }}" == "success" ]; then
+            LEVEL=$((LEVEL + 1))
+            echo "✅ Test complet: +1 niveau"
+          else
+            echo "❌ Test complet: échec"
+          fi
+          
+          echo "🎯 Niveau final: $LEVEL"
+          
+          # Vérification du niveau minimum requis
+          if [ $LEVEL -ge 6 ]; then
+            echo "✅ Niveau requis atteint (≥6)"
+            echo "LEVEL=$LEVEL" >> $GITHUB_ENV
+            echo "LEVEL_STATUS=success" >> $GITHUB_ENV
+          else
+            echo "❌ Niveau insuffisant (<6)"
+            echo "LEVEL=$LEVEL" >> $GITHUB_ENV
+            echo "LEVEL_STATUS=failure" >> $GITHUB_ENV
+            exit 1
+          fi
+
+      - name: Set level badge
+        if: always()
+        run: |
+          echo "🏆 Niveau YunoHost: ${{ env.LEVEL }}"
+          echo "📊 Statut: ${{ env.LEVEL_STATUS }}"

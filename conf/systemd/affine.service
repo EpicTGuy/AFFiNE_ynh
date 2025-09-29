@@ -1,0 +1,72 @@
+[Unit]
+Description=AFFiNE (YunoHost)
+After=network.target
+Wants=network.target
+
+[Service]
+User=__APP__
+Group=__APP__
+WorkingDirectory=/var/www/__APP__
+Environment=NODE_ENV=production
+Environment=PORT=3010
+Environment=HOST=127.0.0.1
+Environment=CONFIG_PATH=/var/www/__APP__/config/config.json
+Environment=LOG_LEVEL=info
+Environment=LOG_PATH=/var/log/__APP__
+Environment=AFFINE_REVISION=stable
+Environment=DB_USERNAME=__APP__
+Environment=DB_PASSWORD=generated_password
+Environment=DB_DATABASE=__APP__
+Environment=DB_HOST=localhost
+Environment=DB_PORT=5432
+Environment=REDIS_URL=redis://localhost:6379/0
+Environment=STORAGE_PATH=/var/www/__APP__/data
+ExecStart=/opt/node_n_VERSION/bin/node server/index.js
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+# Configuration des limites de ressources
+LimitNOFILE=65536
+LimitNPROC=4096
+MemoryLimit=1G
+MemoryHigh=800M
+CPUQuota=50%
+CPUWeight=100
+
+# Configuration de la sécurité
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+RestrictNamespaces=true
+
+# Configuration des répertoires
+ReadWritePaths=/var/www/__APP__
+ReadWritePaths=/var/log/__APP__
+ReadWritePaths=/tmp
+
+# Configuration des logs
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=__APP__
+
+# Configuration du redémarrage
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+# Configuration du signal de terminaison
+KillMode=mixed
+KillSignal=SIGTERM
+FinalKillSignal=SIGKILL
+
+[Install]
+WantedBy=multi-user.target

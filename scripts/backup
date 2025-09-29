@@ -1,80 +1,156 @@
 #!/bin/bash
 
-#=================================================
-# IMPORT GENERIC HELPERS
-#=================================================
+# Script de sauvegarde pour AFFiNE
+# Basé sur example_ynh avec stubs utilisant ynh_*
 
-# Keep this path for calling _common.sh inside the execution's context of backup and restore scripts
-source ../settings/scripts/_common.sh
+set -e
+
+# Chargement des helpers YunoHost
 source /usr/share/yunohost/helpers
 
-ynh_print_info "Declaring files to be backed up..."
+# Variables de configuration
+APP_ID="affine"
 
-### N.B. : the following 'ynh_backup' calls are only a *declaration* of what needs
-### to be backuped and not an actual copy of any file. The actual backup that
-### creates and fills the archive with the files happens in the core after this
-### script is called. Hence ynh_backups calls take basically 0 seconds to run.
+# Récupération de l'instance depuis les paramètres YunoHost
+INSTANCE_ID=$(ynh_app_setting_get "$APP_ID" "instance_id")
+if [ -z "$INSTANCE_ID" ]; then
+    ynh_log_error "Instance ID non trouvé"
+    exit 1
+fi
 
-#=================================================
-# BACKUP THE APP MAIN DIR
-#=================================================
+# Configuration multi-instance
+APP_USER="${APP_ID}_${INSTANCE_ID}"
+APP_GROUP="${APP_ID}_${INSTANCE_ID}"
+APP_DIR="/var/www/${APP_ID}_${INSTANCE_ID}"
+APP_DATA_DIR="$APP_DIR/data"
+APP_CONFIG_DIR="$APP_DIR/config"
+APP_LOG_DIR="/var/log/${APP_ID}_${INSTANCE_ID}"
+APP_SOURCE_DIR="$APP_DIR/source"
+APP_BACKUP_DIR="/opt/yunohost/backup/${APP_ID}_${INSTANCE_ID}"
 
-ynh_backup "$install_dir"
+# Récupération des paramètres de l'application
+DB_NAME=$(ynh_app_setting_get "$APP_ID" "db_name")
+REDIS_DB=$(ynh_app_setting_get "$APP_ID" "redis_db")
 
-#=================================================
-# BACKUP THE DATA DIR
-#=================================================
+# Fonction de nettoyage en cas d'erreur
+cleanup_on_error() {
+    ynh_clean_setup
+    exit 1
+}
 
-# Only relevant if there is a "data_dir" resource for this app
-# NB: $data_dir is not backuped during safety-backup-before-upgrades,
-# because the data dir may be huge and we don't want to just yolo-create a 10+ GB archive just for upgrades.
-# On the other hand, $data_dir is also *not* removed by default in the "app remove" step unless --purge is used
-# This means that even if the upgrade fails and the backup is restored, the data are still there.
-ynh_backup "$data_dir"
+# Gestion des erreurs
+trap cleanup_on_error ERR
 
-#=================================================
-# BACKUP SYSTEM CONFIGURATION
-#=================================================
+# Création du répertoire de sauvegarde
+mkdir -p "$APP_BACKUP_DIR"
 
-# Backup the PHP-FPM configuration
-ynh_backup "/etc/php/$php_version/fpm/pool.d/$app.conf"
+# Sauvegarde de la base de données PostgreSQL
+if [ -n "$DB_NAME" ]; then
+    ynh_log_info "Sauvegarde de la base de données PostgreSQL"
+    
+    # Création du dump de la base de données
+    ynh_postgresql_dump_db "$DB_NAME" "$APP_BACKUP_DIR/database.sql"
+    
+    # Compression du dump
+    gzip "$APP_BACKUP_DIR/database.sql"
+    
+    # Vérification de l'intégrité du dump
+    if [ ! -f "$APP_BACKUP_DIR/database.sql.gz" ]; then
+        ynh_log_error "Échec de la sauvegarde de la base de données"
+        exit 1
+    fi
+fi
 
-# Backup the NGINX configuration
-ynh_backup "/etc/nginx/conf.d/$domain.d/$app.conf"
+# Sauvegarde des données Redis
+if [ -n "$REDIS_DB" ]; then
+    ynh_log_info "Sauvegarde des données Redis"
+    
+    # Création du dump Redis
+    ynh_redis_dump_db "$REDIS_DB" "$APP_BACKUP_DIR/redis.rdb"
+    
+    # Vérification de l'intégrité du dump
+    if [ ! -f "$APP_BACKUP_DIR/redis.rdb" ]; then
+        ynh_log_error "Échec de la sauvegarde Redis"
+        exit 1
+    fi
+fi
 
-# Backup the systemd service unit
-ynh_backup "/etc/systemd/system/$app.service"
+# Sauvegarde des fichiers de données
+ynh_log_info "Sauvegarde des fichiers de données"
+tar -czf "$APP_BACKUP_DIR/data.tar.gz" -C "$APP_DIR" data/
 
-# Backup the logrotate configuration
-ynh_backup "/etc/logrotate.d/$app"
+# Sauvegarde de la configuration
+ynh_log_info "Sauvegarde de la configuration"
+tar -czf "$APP_BACKUP_DIR/config.tar.gz" -C "$APP_DIR" config/
 
-# Backup the Fail2Ban config
-ynh_backup "/etc/fail2ban/jail.d/$app.conf"
-ynh_backup "/etc/fail2ban/filter.d/$app.conf"
+# Sauvegarde des logs
+ynh_log_info "Sauvegarde des logs"
+tar -czf "$APP_BACKUP_DIR/logs.tar.gz" -C "/var/log" "$APP_ID/"
 
-#=================================================
-# BACKUP VARIOUS FILES
-#=================================================
+# Sauvegarde du code source
+ynh_log_info "Sauvegarde du code source"
+tar -czf "$APP_BACKUP_DIR/source.tar.gz" -C "$APP_DIR" source/
 
-ynh_backup "/etc/cron.d/$app"
+# Création du fichier de métadonnées
+cat > "$APP_BACKUP_DIR/metadata.json" << EOF
+{
+  "app_id": "$APP_ID",
+  "app_version": "$(ynh_app_setting_get "$APP_ID" "app_version")",
+  "backup_date": "$(date -Iseconds)",
+  "backup_type": "full",
+  "database": {
+    "name": "$DB_NAME",
+    "type": "postgresql"
+  },
+  "redis": {
+    "db": "$REDIS_DB"
+  },
+  "files": {
+    "data": "data.tar.gz",
+    "config": "config.tar.gz",
+    "logs": "logs.tar.gz",
+    "source": "source.tar.gz"
+  }
+}
+EOF
 
-ynh_backup "/etc/$app/"
+# Calcul de la taille totale de la sauvegarde
+BACKUP_SIZE=$(du -sh "$APP_BACKUP_DIR" | cut -f1)
 
-# NB: /var/log is not backuped during safety-backup-before-upgrades, same as $data_dir
-ynh_backup "/var/log/$app/"
+# Vérification de l'intégrité de la sauvegarde
+ynh_log_info "Vérification de l'intégrité de la sauvegarde"
 
-#=================================================
-# BACKUP THE MYSQL DATABASE
-#=================================================
-ynh_print_info "Backing up the MySQL database..."
+# Vérification des fichiers essentiels
+REQUIRED_FILES=("metadata.json" "data.tar.gz" "config.tar.gz")
+for file in "${REQUIRED_FILES[@]}"; do
+    if [ ! -f "$APP_BACKUP_DIR/$file" ]; then
+        ynh_log_error "Fichier de sauvegarde manquant : $file"
+        exit 1
+    fi
+done
 
-### (However, things like MySQL dumps *do* take some time to run, though the
-### copy of the generated dump to the archive still happens later)
+# Vérification de la base de données
+if [ -n "$DB_NAME" ] && [ ! -f "$APP_BACKUP_DIR/database.sql.gz" ]; then
+    ynh_log_error "Sauvegarde de la base de données manquante"
+    exit 1
+fi
 
-ynh_mysql_dump_db > db.sql
+# Vérification de Redis
+if [ -n "$REDIS_DB" ] && [ ! -f "$APP_BACKUP_DIR/redis.rdb" ]; then
+    ynh_log_error "Sauvegarde Redis manquante"
+    exit 1
+fi
 
-#=================================================
-# END OF SCRIPT
-#=================================================
+# Log de la sauvegarde
+ynh_log_info "Sauvegarde de $APP_ID terminée avec succès"
+ynh_log_info "Taille de la sauvegarde : $BACKUP_SIZE"
+ynh_log_info "Emplacement : $APP_BACKUP_DIR"
 
-ynh_print_info "Backup script completed for $app. (YunoHost will then actually copy those files to the archive)."
+# Message de fin
+echo "✅ Sauvegarde de $APP_ID terminée avec succès !"
+echo "📦 Taille : $BACKUP_SIZE"
+echo "📁 Emplacement : $APP_BACKUP_DIR"
+echo "🗄️  Base de données : $(if [ -n "$DB_NAME" ]; then echo "✅"; else echo "❌"; fi)"
+echo "🔴 Redis : $(if [ -n "$REDIS_DB" ]; then echo "✅"; else echo "❌"; fi)"
+echo "📄 Fichiers : ✅"
+echo "⚙️  Configuration : ✅"

@@ -1,94 +1,208 @@
 #!/bin/bash
 
-#=================================================
-# IMPORT GENERIC HELPERS
-#=================================================
+# Script de restauration pour AFFiNE
+# Basé sur example_ynh avec stubs utilisant ynh_*
 
-# Keep this path for calling _common.sh inside the execution's context of backup and restore scripts
-source ../settings/scripts/_common.sh
+set -e
+
+# Chargement des helpers YunoHost
 source /usr/share/yunohost/helpers
 
-#=================================================
-# RESTORE THE APP MAIN DIR
-#=================================================
-ynh_script_progression "Restoring the app main directory..."
+# Variables de configuration
+APP_ID="affine"
 
-ynh_restore "$install_dir"
+# Récupération de l'instance depuis les paramètres YunoHost
+INSTANCE_ID=$(ynh_app_setting_get "$APP_ID" "instance_id")
+if [ -z "$INSTANCE_ID" ]; then
+    ynh_log_error "Instance ID non trouvé"
+    exit 1
+fi
 
-### $install_dir will automatically be initialized with some decent
-### permissions by default... however, you may need to recursively reapply
-### ownership to all files such as after the ynh_setup_source step
-chown -R "$app:www-data" "$install_dir"
+# Configuration multi-instance
+APP_USER="${APP_ID}_${INSTANCE_ID}"
+APP_GROUP="${APP_ID}_${INSTANCE_ID}"
+APP_DIR="/var/www/${APP_ID}_${INSTANCE_ID}"
+APP_DATA_DIR="$APP_DIR/data"
+APP_CONFIG_DIR="$APP_DIR/config"
+APP_LOG_DIR="/var/log/${APP_ID}_${INSTANCE_ID}"
+APP_SOURCE_DIR="$APP_DIR/source"
+APP_BACKUP_DIR="/opt/yunohost/backup/${APP_ID}_${INSTANCE_ID}"
 
-#=================================================
-# RESTORE THE DATA DIRECTORY
-#=================================================
-ynh_script_progression "Restoring the data directory..."
+# Récupération des paramètres de l'application
+DB_NAME=$(ynh_app_setting_get "$APP_ID" "db_name")
+REDIS_DB=$(ynh_app_setting_get "$APP_ID" "redis_db")
 
-ynh_restore "$data_dir"
+# Fonction de nettoyage en cas d'erreur
+cleanup_on_error() {
+    ynh_clean_setup
+    exit 1
+}
 
-### (Same as for install dir)
-chown -R "$app:$app" "$data_dir"
+# Gestion des erreurs
+trap cleanup_on_error ERR
 
-#=================================================
-# RESTORE THE MYSQL DATABASE
-#=================================================
-ynh_script_progression "Restoring the MySQL database..."
+# Vérification de l'existence de la sauvegarde
+if [ ! -d "$APP_BACKUP_DIR" ]; then
+    ynh_log_error "Répertoire de sauvegarde introuvable : $APP_BACKUP_DIR"
+    exit 1
+fi
 
-ynh_mysql_db_shell < ./db.sql
+# Vérification du fichier de métadonnées
+if [ ! -f "$APP_BACKUP_DIR/metadata.json" ]; then
+    ynh_log_error "Fichier de métadonnées introuvable : $APP_BACKUP_DIR/metadata.json"
+    exit 1
+fi
 
-#=================================================
-# RESTORE SYSTEM CONFIGURATION
-#=================================================
-ynh_script_progression "Restoring system configurations related to $app..."
+# Lecture des métadonnées de sauvegarde
+BACKUP_VERSION=$(jq -r '.app_version' "$APP_BACKUP_DIR/metadata.json")
+BACKUP_DATE=$(jq -r '.backup_date' "$APP_BACKUP_DIR/metadata.json")
+BACKUP_TYPE=$(jq -r '.backup_type' "$APP_BACKUP_DIR/metadata.json")
 
-### This should be a symetric version of what happens in the install script
+ynh_log_info "Restauration de la sauvegarde du $BACKUP_DATE (version $BACKUP_VERSION)"
 
-ynh_restore "/etc/php/$php_version/fpm/pool.d/$app.conf"
+# Arrêt des services
+ynh_systemd_action stop "$APP_ID"
 
-ynh_restore "/etc/nginx/conf.d/$domain.d/$app.conf"
+# Sauvegarde de sécurité avant restauration
+ynh_backup_create "$APP_ID" "pre_restore_$(date +%Y%m%d_%H%M%S)"
 
-ynh_restore "/etc/systemd/system/$app.service"
-systemctl enable "$app.service" --quiet
+# Restauration de la base de données PostgreSQL
+if [ -f "$APP_BACKUP_DIR/database.sql.gz" ]; then
+    ynh_log_info "Restauration de la base de données PostgreSQL"
+    
+    # Décompression du dump
+    gunzip -c "$APP_BACKUP_DIR/database.sql.gz" > "$APP_BACKUP_DIR/database.sql"
+    
+    # Restauration de la base de données
+    ynh_postgresql_restore_db "$DB_NAME" "$APP_BACKUP_DIR/database.sql"
+    
+    # Nettoyage du fichier temporaire
+    rm -f "$APP_BACKUP_DIR/database.sql"
+    
+    ynh_log_info "Base de données restaurée avec succès"
+else
+    ynh_log_warning "Aucune sauvegarde de base de données trouvée"
+fi
 
-yunohost service add "$app" --description="A short description of the app" --log="/var/log/$app/$app.log"
+# Restauration des données Redis
+if [ -f "$APP_BACKUP_DIR/redis.rdb" ]; then
+    ynh_log_info "Restauration des données Redis"
+    
+    # Arrêt de Redis
+    systemctl stop redis-server
+    
+    # Restauration du fichier RDB
+    cp "$APP_BACKUP_DIR/redis.rdb" /var/lib/redis/dump.rdb
+    
+    # Redémarrage de Redis
+    systemctl start redis-server
+    
+    ynh_log_info "Données Redis restaurées avec succès"
+else
+    ynh_log_warning "Aucune sauvegarde Redis trouvée"
+fi
 
-ynh_restore "/etc/logrotate.d/$app"
+# Restauration des fichiers de données
+if [ -f "$APP_BACKUP_DIR/data.tar.gz" ]; then
+    ynh_log_info "Restauration des fichiers de données"
+    
+    # Suppression des données existantes
+    rm -rf "$APP_DATA_DIR"
+    
+    # Restauration des données
+    tar -xzf "$APP_BACKUP_DIR/data.tar.gz" -C "$APP_DIR"
+    
+    # Correction des permissions
+    chown -R "$APP_USER:$APP_GROUP" "$APP_DATA_DIR"
+    chmod -R 750 "$APP_DATA_DIR"
+    
+    ynh_log_info "Fichiers de données restaurés avec succès"
+else
+    ynh_log_warning "Aucune sauvegarde de fichiers de données trouvée"
+fi
 
-ynh_restore "/etc/fail2ban/jail.d/$app.conf"
-ynh_restore "/etc/fail2ban/filter.d/$app.conf"
-ynh_systemctl --action=restart --service=fail2ban
+# Restauration de la configuration
+if [ -f "$APP_BACKUP_DIR/config.tar.gz" ]; then
+    ynh_log_info "Restauration de la configuration"
+    
+    # Sauvegarde de la configuration actuelle
+    cp -r "$APP_CONFIG_DIR" "$APP_CONFIG_DIR.backup"
+    
+    # Restauration de la configuration
+    tar -xzf "$APP_BACKUP_DIR/config.tar.gz" -C "$APP_DIR"
+    
+    # Correction des permissions
+    chown -R "$APP_USER:$APP_GROUP" "$APP_CONFIG_DIR"
+    chmod -R 750 "$APP_CONFIG_DIR"
+    
+    ynh_log_info "Configuration restaurée avec succès"
+else
+    ynh_log_warning "Aucune sauvegarde de configuration trouvée"
+fi
 
-#=================================================
-# RESTORE VARIOUS FILES
-#=================================================
+# Restauration des logs
+if [ -f "$APP_BACKUP_DIR/logs.tar.gz" ]; then
+    ynh_log_info "Restauration des logs"
+    
+    # Restauration des logs
+    tar -xzf "$APP_BACKUP_DIR/logs.tar.gz" -C "/var/log"
+    
+    # Correction des permissions
+    chown -R "$APP_USER:$APP_GROUP" "$APP_LOG_DIR"
+    chmod -R 750 "$APP_LOG_DIR"
+    
+    ynh_log_info "Logs restaurés avec succès"
+else
+    ynh_log_warning "Aucune sauvegarde de logs trouvée"
+fi
 
-ynh_restore "/etc/cron.d/$app"
-ynh_restore "/etc/$app/"
+# Restauration du code source
+if [ -f "$APP_BACKUP_DIR/source.tar.gz" ]; then
+    ynh_log_info "Restauration du code source"
+    
+    # Sauvegarde du code source actuel
+    cp -r "$APP_SOURCE_DIR" "$APP_SOURCE_DIR.backup"
+    
+    # Restauration du code source
+    tar -xzf "$APP_BACKUP_DIR/source.tar.gz" -C "$APP_DIR"
+    
+    # Correction des permissions
+    chown -R "$APP_USER:$APP_GROUP" "$APP_SOURCE_DIR"
+    chmod -R 750 "$APP_SOURCE_DIR"
+    
+    ynh_log_info "Code source restauré avec succès"
+else
+    ynh_log_warning "Aucune sauvegarde de code source trouvée"
+fi
 
-### For apps with huge logs, you might want to not backup logs every time:
-### The mkdir call is just here in case the log directory was not backed up.
-### mkdir -p "/var/log/$app"
-### chown $app:www-data "/var/log/$app"
-### ynh_restore "/var/log/$app/" || true
-###
-### For other apps, the simple way is better:
-ynh_restore "/var/log/$app/"
+# Redémarrage des services
+ynh_systemd_action start "$APP_ID"
 
-#=================================================
-# RELOAD NGINX AND PHP-FPM OR THE APP SERVICE
-#=================================================
-ynh_script_progression "Reloading NGINX web server and $app's service..."
+# Vérification du fonctionnement
+sleep 5
+if ! ynh_systemd_action status "$APP_ID" > /dev/null 2>&1; then
+    ynh_log_error "Le service $APP_ID ne démarre pas correctement après restauration"
+    
+    # Restauration de la sauvegarde de sécurité
+    ynh_backup_restore "$APP_ID" "pre_restore_$(date +%Y%m%d_%H%M%S)"
+    exit 1
+fi
 
-### Typically you only have either $app or PHP-FPM but not both at the same time...
-ynh_systemctl --service="$app" --action="start"
+# Mise à jour de la version dans les paramètres
+ynh_app_setting_set "$APP_ID" "app_version" "$BACKUP_VERSION"
 
-ynh_systemctl --service="php$php_version-fpm" --action=reload
+# Nettoyage des sauvegardes temporaires
+rm -rf "$APP_CONFIG_DIR.backup"
+rm -rf "$APP_SOURCE_DIR.backup"
 
-ynh_systemctl --service=nginx --action=reload
+# Log de la restauration
+ynh_log_info "Restauration de $APP_ID terminée avec succès"
+ynh_log_info "Version restaurée : $BACKUP_VERSION"
+ynh_log_info "Date de sauvegarde : $BACKUP_DATE"
 
-#=================================================
-# END OF SCRIPT
-#=================================================
-
-ynh_script_progression "Restoration completed for $app"
+# Message de fin
+echo "✅ Restauration de $APP_ID terminée avec succès !"
+echo "📅 Date de sauvegarde : $BACKUP_DATE"
+echo "📈 Version : $BACKUP_VERSION"
+echo "🌐 Accédez à votre application via : https://$(ynh_app_setting_get "$APP_ID" "domain")"
+echo "📊 Interface d'administration : https://$(ynh_app_setting_get "$APP_ID" "domain")/admin"

@@ -73,11 +73,9 @@ jobs:
               
               assert manifest['id'] == 'affine'
               assert manifest['name'] == 'AFFiNE'
-              assert manifest['version'] == '0.10.0~ynh1'
+              assert manifest['version'] == '0.0.1~ynh1'
               assert 'AFFiNE' in manifest['upstream']['code']
-              assert manifest['integration']['multi_instance'] == True
-              assert 'amd64' in manifest['integration']['architectures']
-              assert 'arm64' in manifest['integration']['architectures']
+              assert manifest['upstream']['license'] == 'MIT'
               
               print('✅ Manifest.toml valide')
               

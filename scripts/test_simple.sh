@@ -35,7 +35,7 @@ log_error() {
 }
 
 # Début du test
-log_info "🚀 Démarrage du test d'installation simplifié pour $APP_ID"
+log_info "🚀 Démarrage du test simplifié pour $APP_ID"
 
 # Vérification des fichiers essentiels
 log_info "Vérification des fichiers essentiels..."
@@ -206,7 +206,7 @@ log_info "  - Permissions: ✅"
 log_info "  - Structure: ✅"
 log_info "  - CI: ✅"
 
-log_success "🎉 Test d'installation simplifié terminé avec succès pour $APP_ID"
+log_success "🎉 Test simplifié terminé avec succès pour $APP_ID"
 log_success "Tous les composants sont prêts pour l'installation YunoHost"
 
 exit 0

@@ -56,8 +56,8 @@ jobs:
 
       - name: Run structure tests
         run: |
-          chmod +x scripts/test_simple.sh
-          ./scripts/test_simple.sh
+          chmod +x scripts/test_install_simple.sh
+          ./scripts/test_install_simple.sh
 
   # Job 3: Test Manifest
   test-manifest:

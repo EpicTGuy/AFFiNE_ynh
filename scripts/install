@@ -1,9 +1,13 @@
 #!/bin/bash
 set -eu
 source /usr/share/yunohost/helpers
+source "$(dirname "$0")/_common.sh"
 ynh_abort_if_errors
 
 app=$YNH_APP_INSTANCE_NAME
+
+# 0) Installation des dépendances APT
+ynh_install_app_dependencies $pkg_dependencies
 
 # 1) Paramètres
 domain=$(ynh_app_setting_get $app domain)

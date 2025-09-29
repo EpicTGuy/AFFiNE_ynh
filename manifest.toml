@@ -47,6 +47,6 @@ services = ["affine"]
 
   [resources.sources.main]
   # ← épingle un tag AFFiNE ci-dessous et mets le sha256 correspondant
-  url = "https://github.com/toeverything/AFFiNE/archive/refs/tags/v0.XX.Y.tar.gz"
-  sha256 = "TO_FILL"
+  url = "https://github.com/toeverything/AFFiNE/archive/refs/tags/v0.15.0.tar.gz"
+  sha256 = "31ef9aa794d76eab58ba2e0b2694d295bcb2c39dca169d770c50084e00907d98"
   in_subdir = true

@@ -1,0 +1,19 @@
+[Unit]
+Description=AFFiNE (YunoHost smoke test)
+After=network.target
+Wants=network.target
+
+[Service]
+User=__APP__
+WorkingDirectory=/var/www/__APP__
+Environment=NODE_ENV=production
+Environment=PATH=/opt/node_n/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+EnvironmentFile=/var/www/__APP__/.env
+ExecStart=/bin/bash -lc 'node server.js'
+Restart=always
+RestartSec=5
+TimeoutStartSec=60
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,153 @@
+name: CI AFFiNE YunoHost
+
+on:
+  push:
+    branches: [ testing ]
+  pull_request:
+    branches: [ testing ]
+
+env:
+  TEST_DOMAIN: test.example.com
+  TEST_PATH: /affine
+  TEST_IS_PUBLIC: false
+
+jobs:
+  lint-shell:
+    name: "🔍 Lint Shell"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Run shellcheck
+        run: |
+          find scripts/ -name "*.sh" -type f -exec shellcheck {} \;
+
+      - name: Check permissions
+        run: |
+          for script in scripts/*.sh; do
+            if [ -f "$script" ] && [ ! -x "$script" ]; then
+              echo "❌ Script non exécutable: $script"
+              exit 1
+            fi
+          done
+
+  test-structure:
+    name: "🏗️ Test Structure"
+    runs-on: ubuntu-latest
+    needs: lint-shell
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run tests
+        run: |
+          chmod +x scripts/test_simple.sh
+          ./scripts/test_simple.sh
+
+  test-manifest:
+    name: "📋 Test Manifest"
+    runs-on: ubuntu-latest
+    needs: lint-shell
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install toml parser
+        run: pip install toml
+
+      - name: Validate manifest
+        run: |
+          python3 -c "
+          import toml
+          import sys
+          
+          try:
+              with open('manifest.toml', 'r') as f:
+                  manifest = toml.load(f)
+              
+              assert manifest['id'] == 'affine'
+              assert manifest['name'] == 'AFFiNE'
+              assert manifest['version'] == '0.0.1~ynh1'
+              assert 'AFFiNE' in manifest['upstream']['code']
+              assert manifest['upstream']['license'] == 'MIT'
+              
+              print('✅ Manifest.toml valide')
+              
+          except Exception as e:
+              print(f'❌ Erreur: {e}')
+              sys.exit(1)
+          "
+
+  test-config:
+    name: "⚙️ Test Configuration"
+    runs-on: ubuntu-latest
+    needs: lint-shell
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Test NGINX
+        run: |
+          grep -q "__PATH__" conf/nginx.conf || exit 1
+          grep -q "__PORT__" conf/nginx.conf || exit 1
+          grep -q "proxy_pass" conf/nginx.conf || exit 1
+          grep -q "add_header" conf/nginx.conf || exit 1
+
+      - name: Test Systemd
+        run: |
+          grep -q "AFFiNE" conf/systemd/affine.service || exit 1
+          grep -q "NODE_ENV=production" conf/systemd/affine.service || exit 1
+          grep -q "node server.js" conf/systemd/affine.service || exit 1
+          grep -q "Restart=always" conf/systemd/affine.service || exit 1
+
+  test-docs:
+    name: "📚 Test Documentation"
+    runs-on: ubuntu-latest
+    needs: lint-shell
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check docs
+        run: |
+          [ -f "README.md" ] || exit 1
+          [ -f "README_fr.md" ] || exit 1
+          [ -f "README_yunohost.md" ] || exit 1
+          [ -f "README_yunohost_EN.md" ] || exit 1
+          [ -f "PUBLISHING.md" ] || exit 1
+          [ -f "VERSIONING.md" ] || exit 1
+
+  calculate-level:
+    name: "🏆 Calculate Level"
+    runs-on: ubuntu-latest
+    needs: [lint-shell, test-structure, test-manifest, test-config, test-docs]
+    outputs:
+      level: ${{ steps.calculate.outputs.level }}
+    steps:
+      - name: Calculate level
+        id: calculate
+        run: |
+          LEVEL=0
+          [ "${{ needs.lint-shell.result }}" == "success" ] && LEVEL=$((LEVEL + 1))
+          [ "${{ needs.test-structure.result }}" == "success" ] && LEVEL=$((LEVEL + 1))
+          [ "${{ needs.test-manifest.result }}" == "success" ] && LEVEL=$((LEVEL + 1))
+          [ "${{ needs.test-config.result }}" == "success" ] && LEVEL=$((LEVEL + 1))
+          [ "${{ needs.test-docs.result }}" == "success" ] && LEVEL=$((LEVEL + 1))
+          echo "🏆 Niveau YunoHost: $LEVEL"
+          echo "level=$LEVEL" >> $GITHUB_OUTPUT
+
+  update-badges:
+    name: "📊 Update Badges"
+    runs-on: ubuntu-latest
+    needs: calculate-level
+    if: always()
+    steps:
+      - name: Update badges
+        run: |
+          echo "✅ CI terminée - Niveau: ${{ needs.calculate-level.outputs.level }}"

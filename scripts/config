@@ -20,7 +20,8 @@ ynh_abort_if_errors
 # RETRIEVE ARGUMENTS
 #=================================================
 
-install_dir=$(ynh_app_setting_get --key=install_dir)
+app="$YNH_APP_INSTANCE_NAME"
+install_dir=$(ynh_app_setting_get --app="$app" --key=install_dir)
 
 #=================================================
 # SPECIFIC GETTERS FOR TOML SHORT KEY
@@ -89,7 +90,7 @@ set__prices() {
     #---------------------------------------------
     # IMPORTANT: to be able to upgrade properly, you have to save the value in settings too
     #---------------------------------------------
-    ynh_app_setting_set --key=prices --value="$prices"
+    ynh_app_setting_set --app="$app" --key=prices --value="$prices"
 }
 
 #=================================================

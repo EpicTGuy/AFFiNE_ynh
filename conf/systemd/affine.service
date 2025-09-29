@@ -1,19 +1,21 @@
 [Unit]
-Description=AFFiNE (YunoHost smoke test)
-After=network.target
-Wants=network.target
+Description=AFFiNE (YunoHost)
+After=network.target postgresql.service redis-server.service
+Wants=postgresql.service redis-server.service
 
 [Service]
 User=__APP__
-WorkingDirectory=/var/www/__APP__
-Environment=NODE_ENV=production
-# Important : PATH inclut le Node géré par YunoHost
-Environment=PATH=/opt/node_n/bin:/usr/local/bin:/usr/bin
-ExecStart=/bin/bash -lc 'node server.js'
+WorkingDirectory=/var/www/__APP__/app
+EnvironmentFile=/var/www/__APP__/.env
+# Assure l'accès à node/pnpm installés via le helper YunoHost
+Environment=PATH=/opt/node_n/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+
+# AFFiNE est un monorepo Next.js : on démarre via pnpm (build → start)
+ExecStart=/bin/bash -lc 'pnpm start -- --port ${PORT:-4090}'
 Restart=always
 RestartSec=5
-TimeoutStartSec=60
-TimeoutStopSec=20
+TimeoutStartSec=120
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target

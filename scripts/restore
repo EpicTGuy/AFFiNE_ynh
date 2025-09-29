@@ -1,208 +1,26 @@
 #!/bin/bash
-
-# Script de restauration pour AFFiNE
-# Basé sur example_ynh avec stubs utilisant ynh_*
-
-set -e
-
-# Chargement des helpers YunoHost
+set -eu
 source /usr/share/yunohost/helpers
+ynh_abort_if_errors
 
-# Variables de configuration
-APP_ID="affine"
+app="$YNH_APP_INSTANCE_NAME"
+domain="$(ynh_app_setting_get --app="$app" --key=domain)"
+path_url="$(ynh_app_setting_get --app="$app" --key=path)"
+port="$(ynh_app_setting_get --app="$app" --key=port)"
 
-# Récupération de l'instance depuis les paramètres YunoHost
-INSTANCE_ID=$(ynh_app_setting_get "$APP_ID" "instance_id")
-if [ -z "$INSTANCE_ID" ]; then
-    ynh_log_error "Instance ID non trouvé"
-    exit 1
-fi
+install_dir="/var/www/$app"
 
-# Configuration multi-instance
-APP_USER="${APP_ID}_${INSTANCE_ID}"
-APP_GROUP="${APP_ID}_${INSTANCE_ID}"
-APP_DIR="/var/www/${APP_ID}_${INSTANCE_ID}"
-APP_DATA_DIR="$APP_DIR/data"
-APP_CONFIG_DIR="$APP_DIR/config"
-APP_LOG_DIR="/var/log/${APP_ID}_${INSTANCE_ID}"
-APP_SOURCE_DIR="$APP_DIR/source"
-APP_BACKUP_DIR="/opt/yunohost/backup/${APP_ID}_${INSTANCE_ID}"
+# Recréer user/dirs
+ynh_system_user_create --username="$app"
+mkdir -p "$install_dir" "$install_dir/data" "$install_dir/config"
+chown -R "$app:$app" "$install_dir"
 
-# Récupération des paramètres de l'application
-DB_NAME=$(ynh_app_setting_get "$APP_ID" "db_name")
-REDIS_DB=$(ynh_app_setting_get "$APP_ID" "redis_db")
+# Les fichiers/.env/data/config seront restaurés par YunoHost dans $install_dir
 
-# Fonction de nettoyage en cas d'erreur
-cleanup_on_error() {
-    ynh_clean_setup
-    exit 1
-}
+# Regénérer NGINX + systemd
+ynh_add_nginx_config --template="conf/nginx.conf" --domain="$domain" --path_url="$path_url" --port="$port"
+ynh_add_systemd_config --template="conf/systemd/affine.service" --service="$app"
+ynh_systemd_action --service_name="$app" --action=restart --log_path="systemd"
 
-# Gestion des erreurs
-trap cleanup_on_error ERR
-
-# Vérification de l'existence de la sauvegarde
-if [ ! -d "$APP_BACKUP_DIR" ]; then
-    ynh_log_error "Répertoire de sauvegarde introuvable : $APP_BACKUP_DIR"
-    exit 1
-fi
-
-# Vérification du fichier de métadonnées
-if [ ! -f "$APP_BACKUP_DIR/metadata.json" ]; then
-    ynh_log_error "Fichier de métadonnées introuvable : $APP_BACKUP_DIR/metadata.json"
-    exit 1
-fi
-
-# Lecture des métadonnées de sauvegarde
-BACKUP_VERSION=$(jq -r '.app_version' "$APP_BACKUP_DIR/metadata.json")
-BACKUP_DATE=$(jq -r '.backup_date' "$APP_BACKUP_DIR/metadata.json")
-BACKUP_TYPE=$(jq -r '.backup_type' "$APP_BACKUP_DIR/metadata.json")
-
-ynh_log_info "Restauration de la sauvegarde du $BACKUP_DATE (version $BACKUP_VERSION)"
-
-# Arrêt des services
-ynh_systemd_action stop "$APP_ID"
-
-# Sauvegarde de sécurité avant restauration
-ynh_backup_create "$APP_ID" "pre_restore_$(date +%Y%m%d_%H%M%S)"
-
-# Restauration de la base de données PostgreSQL
-if [ -f "$APP_BACKUP_DIR/database.sql.gz" ]; then
-    ynh_log_info "Restauration de la base de données PostgreSQL"
-    
-    # Décompression du dump
-    gunzip -c "$APP_BACKUP_DIR/database.sql.gz" > "$APP_BACKUP_DIR/database.sql"
-    
-    # Restauration de la base de données
-    ynh_postgresql_restore_db "$DB_NAME" "$APP_BACKUP_DIR/database.sql"
-    
-    # Nettoyage du fichier temporaire
-    rm -f "$APP_BACKUP_DIR/database.sql"
-    
-    ynh_log_info "Base de données restaurée avec succès"
-else
-    ynh_log_warning "Aucune sauvegarde de base de données trouvée"
-fi
-
-# Restauration des données Redis
-if [ -f "$APP_BACKUP_DIR/redis.rdb" ]; then
-    ynh_log_info "Restauration des données Redis"
-    
-    # Arrêt de Redis
-    systemctl stop redis-server
-    
-    # Restauration du fichier RDB
-    cp "$APP_BACKUP_DIR/redis.rdb" /var/lib/redis/dump.rdb
-    
-    # Redémarrage de Redis
-    systemctl start redis-server
-    
-    ynh_log_info "Données Redis restaurées avec succès"
-else
-    ynh_log_warning "Aucune sauvegarde Redis trouvée"
-fi
-
-# Restauration des fichiers de données
-if [ -f "$APP_BACKUP_DIR/data.tar.gz" ]; then
-    ynh_log_info "Restauration des fichiers de données"
-    
-    # Suppression des données existantes
-    rm -rf "$APP_DATA_DIR"
-    
-    # Restauration des données
-    tar -xzf "$APP_BACKUP_DIR/data.tar.gz" -C "$APP_DIR"
-    
-    # Correction des permissions
-    chown -R "$APP_USER:$APP_GROUP" "$APP_DATA_DIR"
-    chmod -R 750 "$APP_DATA_DIR"
-    
-    ynh_log_info "Fichiers de données restaurés avec succès"
-else
-    ynh_log_warning "Aucune sauvegarde de fichiers de données trouvée"
-fi
-
-# Restauration de la configuration
-if [ -f "$APP_BACKUP_DIR/config.tar.gz" ]; then
-    ynh_log_info "Restauration de la configuration"
-    
-    # Sauvegarde de la configuration actuelle
-    cp -r "$APP_CONFIG_DIR" "$APP_CONFIG_DIR.backup"
-    
-    # Restauration de la configuration
-    tar -xzf "$APP_BACKUP_DIR/config.tar.gz" -C "$APP_DIR"
-    
-    # Correction des permissions
-    chown -R "$APP_USER:$APP_GROUP" "$APP_CONFIG_DIR"
-    chmod -R 750 "$APP_CONFIG_DIR"
-    
-    ynh_log_info "Configuration restaurée avec succès"
-else
-    ynh_log_warning "Aucune sauvegarde de configuration trouvée"
-fi
-
-# Restauration des logs
-if [ -f "$APP_BACKUP_DIR/logs.tar.gz" ]; then
-    ynh_log_info "Restauration des logs"
-    
-    # Restauration des logs
-    tar -xzf "$APP_BACKUP_DIR/logs.tar.gz" -C "/var/log"
-    
-    # Correction des permissions
-    chown -R "$APP_USER:$APP_GROUP" "$APP_LOG_DIR"
-    chmod -R 750 "$APP_LOG_DIR"
-    
-    ynh_log_info "Logs restaurés avec succès"
-else
-    ynh_log_warning "Aucune sauvegarde de logs trouvée"
-fi
-
-# Restauration du code source
-if [ -f "$APP_BACKUP_DIR/source.tar.gz" ]; then
-    ynh_log_info "Restauration du code source"
-    
-    # Sauvegarde du code source actuel
-    cp -r "$APP_SOURCE_DIR" "$APP_SOURCE_DIR.backup"
-    
-    # Restauration du code source
-    tar -xzf "$APP_BACKUP_DIR/source.tar.gz" -C "$APP_DIR"
-    
-    # Correction des permissions
-    chown -R "$APP_USER:$APP_GROUP" "$APP_SOURCE_DIR"
-    chmod -R 750 "$APP_SOURCE_DIR"
-    
-    ynh_log_info "Code source restauré avec succès"
-else
-    ynh_log_warning "Aucune sauvegarde de code source trouvée"
-fi
-
-# Redémarrage des services
-ynh_systemd_action start "$APP_ID"
-
-# Vérification du fonctionnement
-sleep 5
-if ! ynh_systemd_action status "$APP_ID" > /dev/null 2>&1; then
-    ynh_log_error "Le service $APP_ID ne démarre pas correctement après restauration"
-    
-    # Restauration de la sauvegarde de sécurité
-    ynh_backup_restore "$APP_ID" "pre_restore_$(date +%Y%m%d_%H%M%S)"
-    exit 1
-fi
-
-# Mise à jour de la version dans les paramètres
-ynh_app_setting_set "$APP_ID" "app_version" "$BACKUP_VERSION"
-
-# Nettoyage des sauvegardes temporaires
-rm -rf "$APP_CONFIG_DIR.backup"
-rm -rf "$APP_SOURCE_DIR.backup"
-
-# Log de la restauration
-ynh_log_info "Restauration de $APP_ID terminée avec succès"
-ynh_log_info "Version restaurée : $BACKUP_VERSION"
-ynh_log_info "Date de sauvegarde : $BACKUP_DATE"
-
-# Message de fin
-echo "✅ Restauration de $APP_ID terminée avec succès !"
-echo "📅 Date de sauvegarde : $BACKUP_DATE"
-echo "📈 Version : $BACKUP_VERSION"
-echo "🌐 Accédez à votre application via : https://$(ynh_app_setting_get "$APP_ID" "domain")"
-echo "📊 Interface d'administration : https://$(ynh_app_setting_get "$APP_ID" "domain")/admin"
+curl -fsS "http://127.0.0.1:$port" >/dev/null
+ynh_print_info "Restore terminé pour $app."

@@ -481,3 +481,4 @@ jobs:
         run: |
           echo "🏆 Niveau YunoHost: ${{ env.LEVEL }}"
           echo "📊 Statut: ${{ env.LEVEL_STATUS }}"
+# CI Trigger

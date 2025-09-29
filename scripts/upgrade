@@ -1,109 +1,18 @@
 #!/bin/bash
-
-# Script de mise à jour pour AFFiNE
-# Basé sur example_ynh avec stubs utilisant ynh_*
-
-set -e
-
-# Chargement des helpers YunoHost
+set -eu
 source /usr/share/yunohost/helpers
+ynh_abort_if_errors
 
-# Variables de configuration
-APP_ID="affine"
-APP_USER="affine"
-APP_GROUP="affine"
-APP_DIR="/var/www/$APP_ID"
-APP_DATA_DIR="$APP_DIR/data"
-APP_CONFIG_DIR="$APP_DIR/config"
-APP_LOG_DIR="/var/log/$APP_ID"
-APP_SOURCE_DIR="$APP_DIR/source"
-
-# Récupération des paramètres de l'application
-OLD_VERSION=$(ynh_app_setting_get "$APP_ID" "app_version")
-NEW_VERSION="0.1.0"
-DB_NAME=$(ynh_app_setting_get "$APP_ID" "db_name")
-REDIS_DB=$(ynh_app_setting_get "$APP_ID" "redis_db")
-
-# Fonction de nettoyage en cas d'erreur
-cleanup_on_error() {
-    ynh_clean_setup
-    exit 1
-}
-
-# Gestion des erreurs
-trap cleanup_on_error ERR
-
-# Vérification de la version actuelle
-if [ "$OLD_VERSION" = "$NEW_VERSION" ]; then
-    echo "ℹ️  L'application est déjà à la version $NEW_VERSION"
-    exit 0
+app="$YNH_APP_INSTANCE_NAME"
+port="$(ynh_app_setting_get --app="$app" --key=port || true)"
+if [ -z "${port:-}" ]; then
+  port="$(ynh_find_port --port=4090)"
+  ynh_app_setting_set --app="$app" --key=port --value="$port"
 fi
 
-# Sauvegarde de sécurité avant la mise à jour
-ynh_backup_create "$APP_ID" "pre_upgrade_$OLD_VERSION"
+# Assure que Node est encore là
+ynh_nodejs_install --package "$app" --nodejs_version "lts" || true
 
-# Arrêt des services
-ynh_systemd_action stop "$APP_ID"
-
-# Sauvegarde de la configuration actuelle
-cp "$APP_CONFIG_DIR/config.json" "$APP_CONFIG_DIR/config.json.backup"
-
-# Mise à jour du code source
-cd "$APP_SOURCE_DIR"
-ynh_exec_as "$APP_USER" git fetch origin
-ynh_exec_as "$APP_USER" git checkout main
-ynh_exec_as "$APP_USER" git pull origin main
-
-# Mise à jour des dépendances Node.js
-ynh_exec_as "$APP_USER" npm install --production
-
-# Migration de la base de données si nécessaire
-if [ "$OLD_VERSION" != "$NEW_VERSION" ]; then
-    ynh_log_info "Migration de la base de données de $OLD_VERSION vers $NEW_VERSION"
-    
-    # Exécution des migrations
-    # TODO: Implémenter les vraies migrations AFFiNE
-    ynh_exec_as "$APP_USER" npm run migrate || true
-    
-    # Vérification de l'intégrité des données
-    ynh_exec_as "$APP_USER" npm run check-db || true
-fi
-
-# Mise à jour de la configuration si nécessaire
-if [ -f "$APP_CONFIG_DIR/config.json.new" ]; then
-    mv "$APP_CONFIG_DIR/config.json.new" "$APP_CONFIG_DIR/config.json"
-fi
-
-# Mise à jour du service systemd
-ynh_update_systemd_config "$APP_ID" "$APP_USER" "$APP_GROUP" "$APP_SOURCE_DIR" "$(ynh_app_setting_get "$APP_ID" "app_port")"
-
-# Mise à jour de la configuration NGINX
-ynh_update_nginx_config "$APP_ID" "conf/nginx.conf"
-
-# Redémarrage des services
-ynh_systemd_action start "$APP_ID"
-
-# Vérification du fonctionnement
-sleep 5
-if ! ynh_systemd_action status "$APP_ID" > /dev/null 2>&1; then
-    ynh_log_error "Le service $APP_ID ne démarre pas correctement"
-    
-    # Restauration de la sauvegarde
-    ynh_backup_restore "$APP_ID" "pre_upgrade_$OLD_VERSION"
-    exit 1
-fi
-
-# Mise à jour de la version dans les paramètres
-ynh_app_setting_set "$APP_ID" "app_version" "$NEW_VERSION"
-
-# Nettoyage des sauvegardes temporaires
-rm -f "$APP_CONFIG_DIR/config.json.backup"
-
-# Log de la mise à jour
-ynh_log_info "Mise à jour de $APP_ID de $OLD_VERSION vers $NEW_VERSION terminée avec succès"
-
-# Message de fin
-echo "✅ $APP_ID a été mis à jour avec succès !"
-echo "📈 Version : $OLD_VERSION → $NEW_VERSION"
-echo "🌐 Accédez à votre application via : https://$(ynh_app_setting_get "$APP_ID" "domain")"
-echo "📊 Interface d'administration : https://$(ynh_app_setting_get "$APP_ID" "domain")/admin"
+# Rien de spécial à recompiler en smoke test ; on redémarre simplement
+ynh_systemd_action --service_name="$app" --action=restart --log_path="systemd"
+curl -fsS "http://127.0.0.1:$port" >/dev/null

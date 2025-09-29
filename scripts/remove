@@ -1,98 +1,22 @@
 #!/bin/bash
-
-# Script de suppression pour AFFiNE
-# Basé sur example_ynh avec stubs utilisant ynh_*
-
-set -e
-
-# Chargement des helpers YunoHost
+set -eu
 source /usr/share/yunohost/helpers
+ynh_abort_if_errors
 
-# Variables de configuration
-APP_ID="affine"
+app="$YNH_APP_INSTANCE_NAME"
 
-# Récupération de l'instance depuis les paramètres YunoHost
-INSTANCE_ID=$(ynh_app_setting_get "$APP_ID" "instance_id")
-if [ -z "$INSTANCE_ID" ]; then
-    ynh_log_error "Instance ID non trouvé"
-    exit 1
-fi
+# Stop + disable service
+ynh_systemd_action --service_name="$app" --action=stop --log_path="systemd" || true
+ynh_remove_systemd_config --service="$app"
 
-# Configuration multi-instance
-APP_USER="${APP_ID}_${INSTANCE_ID}"
-APP_GROUP="${APP_ID}_${INSTANCE_ID}"
-APP_DIR="/var/www/${APP_ID}_${INSTANCE_ID}"
-APP_DATA_DIR="$APP_DIR/data"
-APP_CONFIG_DIR="$APP_DIR/config"
-APP_LOG_DIR="/var/log/${APP_ID}_${INSTANCE_ID}"
-APP_SOURCE_DIR="$APP_DIR/source"
+# Remove NGINX
+ynh_remove_nginx_config
 
-# Récupération des paramètres de l'application
-DB_NAME=$(ynh_app_setting_get "$APP_ID" "db_name")
-REDIS_DB=$(ynh_app_setting_get "$APP_ID" "redis_db")
+# Option : conserver /var/www/$app (données) pour sécurité
+# ynh_secure_remove --file="/var/www/$app"  # décommente si tu veux supprimer
 
-# Fonction de nettoyage en cas d'erreur
-cleanup_on_error() {
-    ynh_clean_setup
-    exit 1
-}
+# Remove Node runtime
+ynh_nodejs_remove --package "$app"
 
-# Gestion des erreurs
-trap cleanup_on_error ERR
-
-# Arrêt des services
-ynh_systemd_action stop "$APP_ID"
-ynh_systemd_action disable "$APP_ID"
-
-# Suppression de la configuration SSOwat
-ynh_remove_ssowat_config "$APP_ID"
-
-# Suppression de la configuration NGINX
-ynh_remove_nginx_config "$APP_ID"
-
-# Suppression de la configuration SSL
-ynh_remove_ssl_config "$APP_ID"
-
-# Suppression de la configuration systemd
-ynh_remove_systemd_config "$APP_ID"
-
-# Suppression de la base de données PostgreSQL
-if [ -n "$DB_NAME" ]; then
-    ynh_postgresql_drop_db "$DB_NAME"
-    ynh_postgresql_execute_as_root "DROP USER IF EXISTS $APP_USER;"
-fi
-
-# Suppression de la base de données Redis
-if [ -n "$REDIS_DB" ]; then
-    ynh_redis_drop_db "$REDIS_DB"
-fi
-
-# Suppression des répertoires de l'application
-ynh_secure_remove "$APP_DIR"
-
-# Suppression des logs
-ynh_secure_remove "$APP_LOG_DIR"
-
-# Suppression de l'utilisateur système
-ynh_system_user_delete "$APP_USER"
-
-# Suppression de la configuration de monitoring
-ynh_remove_monitoring_config "$APP_ID"
-
-# Suppression de la configuration de sauvegarde
-ynh_remove_backup_config "$APP_ID"
-
-# Nettoyage des paramètres de l'application
-ynh_app_setting_delete "$APP_ID" "app_name"
-ynh_app_setting_delete "$APP_ID" "app_version"
-ynh_app_setting_delete "$APP_ID" "app_port"
-ynh_app_setting_delete "$APP_ID" "db_name"
-ynh_app_setting_delete "$APP_ID" "redis_db"
-
-# Log de la suppression
-ynh_log_info "Suppression de $APP_ID terminée avec succès"
-
-# Message de fin
-echo "✅ $APP_ID a été supprimé avec succès !"
-echo "🗑️  Toutes les données ont été supprimées"
-echo "🔧 Les services ont été arrêtés et désactivés"
+# Remove user
+ynh_system_user_delete --username="$app"

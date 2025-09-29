@@ -91,7 +91,7 @@ else
     exit 1
 fi
 
-if grep -q 'version = "0.10.0~ynh1"' manifest.toml; then
+if grep -q 'version = "0.0.1~ynh1"' manifest.toml; then
     log_success "✅ Version correcte"
 else
     log_error "❌ Version incorrecte"

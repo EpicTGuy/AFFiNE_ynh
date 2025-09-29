@@ -1,319 +1,61 @@
 #!/bin/bash
-
-# Script d'installation pour AFFiNE
-# Basé sur le manifest.toml v2 et les helpers YunoHost v2.1
-
-set -e
-
-# Chargement des helpers YunoHost
+# Smoke test install script for AFFiNE YunoHost package (no upstream yet)
+set -eu
 source /usr/share/yunohost/helpers
 
-# Variables de configuration
-APP_ID="affine"
-APP_NAME="AFFiNE"
-APP_VERSION="0.10.0~ynh1"
-
-# Récupération de l'instance depuis les paramètres YunoHost
-INSTANCE_ID=$(ynh_app_setting_get "$APP_ID" "instance_id")
-if [ -z "$INSTANCE_ID" ]; then
-    INSTANCE_ID=$(ynh_string_random 8)
-    ynh_app_setting_set "$APP_ID" "instance_id" "$INSTANCE_ID"
-fi
-
-# Configuration multi-instance
-APP_USER="${APP_ID}_${INSTANCE_ID}"
-APP_GROUP="${APP_ID}_${INSTANCE_ID}"
-APP_DIR="/var/www/${APP_ID}_${INSTANCE_ID}"
-APP_DATA_DIR="$APP_DIR/data"
-APP_CONFIG_DIR="$APP_DIR/config"
-APP_LOG_DIR="/var/log/${APP_ID}_${INSTANCE_ID}"
-APP_SOURCE_DIR="$APP_DIR/source"
-APP_WWW_DIR="$APP_DIR/app"
-
-# Ports et services dynamiques
-APP_PORT=$(ynh_find_port 3010)
-DB_NAME="${APP_ID}_${INSTANCE_ID}"
-REDIS_DB="$INSTANCE_ID"
-
-# Fonction de nettoyage en cas d'erreur
-cleanup_on_error() {
-    ynh_clean_setup
-    exit 1
-}
-
-# Gestion des erreurs
-trap cleanup_on_error ERR
-
-# 1) Gestion des erreurs et progression
 ynh_abort_if_errors
-ynh_script_progression "Installation d'AFFiNE..." 0 100
 
-# 2) Récupération des paramètres d'installation
-ynh_script_progression "Récupération des paramètres..." 5 100
+app=$YNH_APP_INSTANCE_NAME
 
-DOMAIN=$(ynh_app_setting_get "$APP_ID" "domain")
-PATH_URL=$(ynh_app_setting_get "$APP_ID" "path")
-IS_PUBLIC=$(ynh_app_setting_get "$APP_ID" "is_public")
+# 1) Récupérer réponses d'install
+domain=$(ynh_app_setting_get $app domain)
+path_url=$(ynh_app_setting_get $app path)
+if [ -z "${domain:-}" ]; then domain=$(ynh_read_manifest --manifest=manifest.toml --key=install.domain --default=""); fi
+if [ -z "${path_url:-}" ]; then path_url=$(ynh_read_manifest --manifest=manifest.toml --key=install.path.default); fi
 
-# Validation des paramètres
-if [ -z "$DOMAIN" ]; then
-    ynh_log_error "Le domaine n'est pas défini"
-    exit 1
-fi
+# 2) Créer l'utilisateur système et répertoires persistants
+ynh_system_user_create --username=$app
+install_dir=/var/www/$app
+mkdir -p "$install_dir" "$install_dir/data" "$install_dir/config"
+chown -R $app:$app "$install_dir"
 
-if [ -z "$PATH_URL" ]; then
-    PATH_URL="/affine"
-fi
+# 3) Allouer un port interne et l'enregistrer
+port=$(ynh_find_port --port=4090)
+ynh_app_setting_set $app port $port
 
-if [ -z "$IS_PUBLIC" ]; then
-    IS_PUBLIC="false"
-fi
+# 4) Installer Node LTS via helper
+ynh_nodejs_install --package $app --nodejs_version lts
 
-# Enregistrement des paramètres
-ynh_app_setting_set "$APP_ID" "domain" "$DOMAIN"
-ynh_app_setting_set "$APP_ID" "path" "$PATH_URL"
-ynh_app_setting_set "$APP_ID" "is_public" "$IS_PUBLIC"
+# 5) Déployer un mini serveur Node (smoke test)
+cat > "$install_dir/server.js" <<'JS'
+const http = require('http');
+const PORT = process.env.PORT || 4090;
+const server = http.createServer((req, res) => {
+  res.setHeader('Content-Type','text/html; charset=utf-8');
+  res.end(`<h1>AFFiNE — paquet YunoHost</h1><p>Smoke test OK.</p>`);
+});
+server.listen(PORT, '127.0.0.1', () => console.log('AFFiNE test listening on', PORT));
+JS
 
-ynh_log_info "Paramètres récupérés : domain=$DOMAIN, path=$PATH_URL, is_public=$IS_PUBLIC"
+cat > "$install_dir/.env" <<ENV
+PORT=$port
+ENV
 
-# 3) Création de l'utilisateur système et des dossiers persistants
-ynh_script_progression "Création de l'utilisateur système..." 10 100
+chown -R $app:$app "$install_dir"
+chmod 640 "$install_dir/.env"
 
-# Création de l'utilisateur système
-ynh_system_user_create "$APP_USER" "$APP_GROUP"
+# 6) NGINX
+ynh_add_nginx_config --template="conf/nginx.conf" --domain="$domain" --path_url="$path_url" --port="$port"
 
-# Création des dossiers persistants selon resources.*
-ynh_exec_as "$APP_USER" mkdir -p "$APP_DATA_DIR"
-ynh_exec_as "$APP_USER" mkdir -p "$APP_CONFIG_DIR"
-ynh_exec_as "$APP_USER" mkdir -p "$APP_SOURCE_DIR"
-ynh_exec_as "$APP_USER" mkdir -p "$APP_WWW_DIR"
-ynh_exec_as "$APP_USER" mkdir -p "$APP_LOG_DIR"
+# 7) Systemd
+ynh_add_systemd_config --template="conf/systemd/affine.service" --service=$app
 
-# Configuration des permissions
-chown -R "$APP_USER:$APP_GROUP" "$APP_DIR"
-chmod -R 750 "$APP_DIR"
-chmod -R 750 "$APP_LOG_DIR"
+# 8) Démarrer le service
+ynh_systemd_action --service_name="$app" --action=restart --log_path="systemd"
 
-ynh_log_info "Utilisateur système et dossiers créés"
+# 9) Healthcheck
+ynh_script_progression --message="Healthcheck..." --time --weight=1
+curl -fsS "http://127.0.0.1:${port}" >/dev/null
 
-# 4) Installation de Node.js LTS
-ynh_script_progression "Installation de Node.js LTS..." 15 100
-
-ynh_nodejs_install --package "$APP_ID" --nodejs_version "lts"
-
-# Installation de PNPM (gestionnaire de paquets AFFiNE)
-npm install -g pnpm
-ynh_log_info "PNPM installé"
-
-# Vérification de l'installation
-NODE_VERSION=$(node --version)
-ynh_log_info "Node.js installé : $NODE_VERSION"
-
-# 5) Téléchargement et extraction des sources
-ynh_script_progression "Téléchargement des sources..." 25 100
-
-# Récupération des informations de source depuis le manifest
-SOURCE_URL="https://github.com/toeverything/AFFiNE/releases/download/v0.10.0/affine-v0.10.0-linux-x64.tar.gz"
-SOURCE_CHECKSUM="a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456"
-
-# Téléchargement et extraction
-ynh_setup_source "$APP_SOURCE_DIR" "$SOURCE_URL" "$SOURCE_CHECKSUM"
-
-ynh_log_info "Sources téléchargées et extraites"
-
-# 6) Installation des dépendances Node et build de production
-ynh_script_progression "Installation des dépendances Node..." 35 100
-
-cd "$APP_SOURCE_DIR"
-
-# Installation de PNPM si nécessaire
-if ! command -v pnpm &> /dev/null; then
-    ynh_exec_as "$APP_USER" npm install -g pnpm
-fi
-
-# Installation des dépendances
-ynh_exec_as "$APP_USER" pnpm install --frozen-lockfile
-
-ynh_script_progression "Build de production..." 50 100
-
-# Build de production selon BUILDING.md upstream
-ynh_exec_as "$APP_USER" pnpm build
-
-ynh_log_info "Dépendances installées et build terminé"
-
-# 7) Déploiement des artefacts dans /var/www/__APP__
-ynh_script_progression "Déploiement des artefacts..." 60 100
-
-# Copie des artefacts buildés
-ynh_exec_as "$APP_USER" cp -r dist/* "$APP_WWW_DIR"
-
-# Configuration des permissions sûres
-chown -R "$APP_USER:$APP_GROUP" "$APP_WWW_DIR"
-chmod -R 750 "$APP_WWW_DIR"
-
-ynh_log_info "Artefacts déployés dans $APP_WWW_DIR"
-
-# 8) Génération du fichier de configuration
-ynh_script_progression "Génération de la configuration..." 70 100
-
-# Configuration de la base de données PostgreSQL
-ynh_postgresql_create_db "$DB_NAME" "$APP_USER"
-DB_PASSWORD=$(ynh_string_random 32)
-ynh_postgresql_execute_as_root "CREATE USER $APP_USER WITH PASSWORD '$DB_PASSWORD';"
-ynh_postgresql_execute_as_root "GRANT ALL PRIVILEGES ON DATABASE $DB_NAME TO $APP_USER;"
-
-# Configuration de Redis
-ynh_redis_create_db "$REDIS_DB" "$APP_USER"
-
-# Génération du fichier de configuration
-cat > "$APP_CONFIG_DIR/config.json" << EOF
-{
-  "database": {
-    "url": "postgresql://$APP_USER:$DB_PASSWORD@localhost:5432/$DB_NAME"
-  },
-  "redis": {
-    "url": "redis://localhost:6379/$REDIS_DB"
-  },
-  "server": {
-    "port": $APP_PORT,
-    "host": "127.0.0.1"
-  },
-  "security": {
-    "secret": "$(ynh_string_random 64)"
-  },
-  "storage": {
-    "path": "$APP_DATA_DIR"
-  },
-  "logs": {
-    "path": "$APP_LOG_DIR",
-    "level": "info"
-  },
-  "app": {
-    "name": "$APP_NAME",
-    "version": "$APP_VERSION",
-    "domain": "$DOMAIN",
-    "path": "$PATH_URL",
-    "is_public": $IS_PUBLIC
-  }
-}
-EOF
-
-# Configuration des permissions
-chown "$APP_USER:$APP_GROUP" "$APP_CONFIG_DIR/config.json"
-chmod 640 "$APP_CONFIG_DIR/config.json"
-
-ynh_log_info "Configuration générée"
-
-# 9) Configuration de SSOwat
-ynh_script_progression "Configuration de SSOwat..." 75 100
-
-# Configuration SSOwat pour l'authentification
-ynh_add_ssowat_config "$APP_ID" "$DOMAIN" "$PATH_URL" "$IS_PUBLIC"
-
-ynh_log_info "SSOwat configuré"
-
-# 10) Installation de NGINX
-ynh_script_progression "Configuration de NGINX..." 80 100
-
-# Configuration NGINX avec support root/subpath automatique
-ynh_add_nginx_config "$APP_ID" "conf/nginx.conf"
-
-# Configuration SSL
-ynh_add_ssl_config "$APP_ID"
-
-ynh_log_info "NGINX configuré"
-
-# 11) Installation du service systemd
-ynh_script_progression "Configuration du service systemd..." 85 100
-
-# Configuration du service systemd
-ynh_add_systemd_config "$APP_ID" "$APP_USER" "$APP_GROUP" "$APP_WWW_DIR" "$APP_PORT"
-
-# Configuration des variables d'environnement
-ynh_add_config "$APP_ID" "NODE_ENV=production" "$APP_CONFIG_DIR"
-ynh_add_config "$APP_ID" "PORT=$APP_PORT" "$APP_CONFIG_DIR"
-ynh_add_config "$APP_ID" "HOST=127.0.0.1" "$APP_CONFIG_DIR"
-ynh_add_config "$APP_ID" "CONFIG_PATH=$APP_CONFIG_DIR/config.json" "$APP_CONFIG_DIR"
-
-ynh_log_info "Service systemd configuré"
-
-# 12) Démarrage du service
-ynh_script_progression "Démarrage du service..." 90 100
-
-ynh_systemd_action --service_name="$APP_ID" --action=start
-ynh_systemd_action --service_name="$APP_ID" --action=enable
-
-ynh_log_info "Service démarré et activé"
-
-# 13) Healthcheck HTTP local puis test URL publique
-ynh_script_progression "Tests de santé..." 95 100
-
-# Attendre que le service soit prêt
-sleep 10
-
-# Healthcheck local
-ynh_log_info "Test de santé local..."
-if ! curl -f "http://127.0.0.1:$APP_PORT/health" > /dev/null 2>&1; then
-    ynh_log_error "Le service ne répond pas sur le port local $APP_PORT"
-    exit 1
-fi
-
-ynh_log_info "✅ Service local opérationnel"
-
-# Test via URL publique
-ynh_log_info "Test de l'URL publique..."
-PUBLIC_URL="https://$DOMAIN$PATH_URL"
-if ! curl -f "$PUBLIC_URL" > /dev/null 2>&1; then
-    ynh_log_warning "L'URL publique n'est pas encore accessible : $PUBLIC_URL"
-else
-    ynh_log_info "✅ URL publique accessible : $PUBLIC_URL"
-fi
-
-# 14) Enregistrement des settings finaux
-ynh_script_progression "Finalisation..." 98 100
-
-# Enregistrement des paramètres finaux
-ynh_app_setting_set "$APP_ID" "app_name" "$APP_NAME"
-ynh_app_setting_set "$APP_ID" "app_version" "$APP_VERSION"
-ynh_app_setting_set "$APP_ID" "app_port" "$APP_PORT"
-ynh_app_setting_set "$APP_ID" "db_name" "$DB_NAME"
-ynh_app_setting_set "$APP_ID" "redis_db" "$REDIS_DB"
-ynh_app_setting_set "$APP_ID" "public_url" "$PUBLIC_URL"
-ynh_app_setting_set "$APP_ID" "install_date" "$(date -Iseconds)"
-
-# Configuration du monitoring
-ynh_add_monitoring_config "$APP_ID"
-
-# Configuration des sauvegardes
-ynh_add_backup_config "$APP_ID" "$APP_DATA_DIR,$APP_CONFIG_DIR"
-
-# Finalisation
-ynh_script_progression "Installation terminée !" 100 100
-
-# Log de l'installation
-ynh_log_info "Installation de $APP_NAME terminée avec succès"
-
-# Message de fin
-echo ""
-echo "🎉 $APP_NAME a été installé avec succès !"
-echo ""
-echo "📊 Informations d'installation :"
-echo "   • Version : $APP_VERSION"
-echo "   • Port : $APP_PORT"
-echo "   • Base de données : $DB_NAME"
-echo "   • Redis : $REDIS_DB"
-echo ""
-echo "🌐 Accès à l'application :"
-echo "   • URL publique : $PUBLIC_URL"
-echo "   • Interface d'administration : $PUBLIC_URL/admin"
-echo ""
-echo "📚 Documentation :"
-echo "   • Utilisateur : https://docs.affine.pro/user"
-echo "   • Administrateur : https://docs.affine.pro/admin"
-echo ""
-echo "🔧 Gestion :"
-echo "   • Logs : $APP_LOG_DIR"
-echo "   • Configuration : $APP_CONFIG_DIR"
-echo "   • Données : $APP_DATA_DIR"
-echo ""
-echo "✅ Installation terminée !"
+# 10) Permissions (public/privé gérées par SSOwat via init_main_permission)
+ynh_script_progression --message="Install terminé." --time --last

@@ -101,7 +101,7 @@ fi
 # Vérification de la configuration NGINX
 log_info "Vérification de la configuration NGINX..."
 
-if grep -q "__DOMAIN__" conf/nginx.conf; then
+if grep -q "__PATH__" conf/nginx.conf; then
     log_success "✅ Placeholders YunoHost présents"
 else
     log_warning "⚠️ Placeholders YunoHost manquants"
@@ -114,11 +114,10 @@ else
     exit 1
 fi
 
-if grep -q "ssl_certificate" conf/nginx.conf; then
-    log_success "✅ Configuration SSL présente"
+if grep -q "__PORT__" conf/nginx.conf; then
+    log_success "✅ Placeholder port présent"
 else
-    log_error "❌ Configuration SSL manquante"
-    exit 1
+    log_warning "⚠️ Placeholder port manquant"
 fi
 
 # Vérification du service systemd

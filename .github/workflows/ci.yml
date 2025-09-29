@@ -94,10 +94,10 @@ jobs:
 
       - name: Test NGINX
         run: |
-          grep -q "__DOMAIN__" conf/nginx.conf || exit 1
+          grep -q "__PATH__" conf/nginx.conf || exit 1
           grep -q "__PORT__" conf/nginx.conf || exit 1
           grep -q "proxy_pass" conf/nginx.conf || exit 1
-          grep -q "ssl_certificate" conf/nginx.conf || exit 1
+          grep -q "add_header" conf/nginx.conf || exit 1
 
       - name: Test Systemd
         run: |

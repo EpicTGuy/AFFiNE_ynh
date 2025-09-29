@@ -10,14 +10,14 @@ port="$(ynh_app_setting_get --app="$app" --key=port)"
 
 install_dir="/var/www/$app"
 
-# Recréer user/dirs
+# Recréer user + dossiers vides
 ynh_system_user_create --username="$app"
 mkdir -p "$install_dir" "$install_dir/data" "$install_dir/config"
 chown -R "$app:$app" "$install_dir"
 
-# Les fichiers/.env/data/config seront restaurés par YunoHost dans $install_dir
+# YunoHost restaurera .env/data/config depuis l'archive
 
-# Regénérer NGINX + systemd
+# Régénérer NGINX + systemd
 ynh_add_nginx_config --template="conf/nginx.conf" --domain="$domain" --path_url="$path_url" --port="$port"
 ynh_add_systemd_config --template="conf/systemd/affine.service" --service="$app"
 ynh_systemd_action --service_name="$app" --action=restart --log_path="systemd"

@@ -6,13 +6,9 @@ ynh_abort_if_errors
 app="$YNH_APP_INSTANCE_NAME"
 install_dir="/var/www/$app"
 
-# Sauvegarde fichiers de conf et données
+# Sauvegarde fichiers de conf et données uniquement
 ynh_backup_if_checksum --file="$install_dir/.env"
 ynh_backup --src_path="$install_dir/data"
 ynh_backup --src_path="$install_dir/config"
-
-# Sauvegarde NGINX + systemd générés
-ynh_backup --src_path="/etc/nginx/conf.d/$(ynh_normalize_url_path --full_domain="$(ynh_app_setting_get --app=$app --key=domain)")$(ynh_normalize_url_path --path="$(ynh_app_setting_get --app=$app --key=path)").d/$app.conf" || true
-ynh_backup --src_path="/etc/systemd/system/$app.service"
 
 ynh_print_info "Backup terminé pour $app."

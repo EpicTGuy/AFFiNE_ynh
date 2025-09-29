@@ -1,156 +1,18 @@
 #!/bin/bash
-
-# Script de sauvegarde pour AFFiNE
-# Basé sur example_ynh avec stubs utilisant ynh_*
-
-set -e
-
-# Chargement des helpers YunoHost
+set -eu
 source /usr/share/yunohost/helpers
+ynh_abort_if_errors
 
-# Variables de configuration
-APP_ID="affine"
+app="$YNH_APP_INSTANCE_NAME"
+install_dir="/var/www/$app"
 
-# Récupération de l'instance depuis les paramètres YunoHost
-INSTANCE_ID=$(ynh_app_setting_get "$APP_ID" "instance_id")
-if [ -z "$INSTANCE_ID" ]; then
-    ynh_log_error "Instance ID non trouvé"
-    exit 1
-fi
+# Sauvegarde fichiers de conf et données
+ynh_backup_if_checksum --file="$install_dir/.env"
+ynh_backup --src_path="$install_dir/data"
+ynh_backup --src_path="$install_dir/config"
 
-# Configuration multi-instance
-APP_USER="${APP_ID}_${INSTANCE_ID}"
-APP_GROUP="${APP_ID}_${INSTANCE_ID}"
-APP_DIR="/var/www/${APP_ID}_${INSTANCE_ID}"
-APP_DATA_DIR="$APP_DIR/data"
-APP_CONFIG_DIR="$APP_DIR/config"
-APP_LOG_DIR="/var/log/${APP_ID}_${INSTANCE_ID}"
-APP_SOURCE_DIR="$APP_DIR/source"
-APP_BACKUP_DIR="/opt/yunohost/backup/${APP_ID}_${INSTANCE_ID}"
+# Sauvegarde NGINX + systemd générés
+ynh_backup --src_path="/etc/nginx/conf.d/$(ynh_normalize_url_path --full_domain="$(ynh_app_setting_get --app=$app --key=domain)")$(ynh_normalize_url_path --path="$(ynh_app_setting_get --app=$app --key=path)").d/$app.conf" || true
+ynh_backup --src_path="/etc/systemd/system/$app.service"
 
-# Récupération des paramètres de l'application
-DB_NAME=$(ynh_app_setting_get "$APP_ID" "db_name")
-REDIS_DB=$(ynh_app_setting_get "$APP_ID" "redis_db")
-
-# Fonction de nettoyage en cas d'erreur
-cleanup_on_error() {
-    ynh_clean_setup
-    exit 1
-}
-
-# Gestion des erreurs
-trap cleanup_on_error ERR
-
-# Création du répertoire de sauvegarde
-mkdir -p "$APP_BACKUP_DIR"
-
-# Sauvegarde de la base de données PostgreSQL
-if [ -n "$DB_NAME" ]; then
-    ynh_log_info "Sauvegarde de la base de données PostgreSQL"
-    
-    # Création du dump de la base de données
-    ynh_postgresql_dump_db "$DB_NAME" "$APP_BACKUP_DIR/database.sql"
-    
-    # Compression du dump
-    gzip "$APP_BACKUP_DIR/database.sql"
-    
-    # Vérification de l'intégrité du dump
-    if [ ! -f "$APP_BACKUP_DIR/database.sql.gz" ]; then
-        ynh_log_error "Échec de la sauvegarde de la base de données"
-        exit 1
-    fi
-fi
-
-# Sauvegarde des données Redis
-if [ -n "$REDIS_DB" ]; then
-    ynh_log_info "Sauvegarde des données Redis"
-    
-    # Création du dump Redis
-    ynh_redis_dump_db "$REDIS_DB" "$APP_BACKUP_DIR/redis.rdb"
-    
-    # Vérification de l'intégrité du dump
-    if [ ! -f "$APP_BACKUP_DIR/redis.rdb" ]; then
-        ynh_log_error "Échec de la sauvegarde Redis"
-        exit 1
-    fi
-fi
-
-# Sauvegarde des fichiers de données
-ynh_log_info "Sauvegarde des fichiers de données"
-tar -czf "$APP_BACKUP_DIR/data.tar.gz" -C "$APP_DIR" data/
-
-# Sauvegarde de la configuration
-ynh_log_info "Sauvegarde de la configuration"
-tar -czf "$APP_BACKUP_DIR/config.tar.gz" -C "$APP_DIR" config/
-
-# Sauvegarde des logs
-ynh_log_info "Sauvegarde des logs"
-tar -czf "$APP_BACKUP_DIR/logs.tar.gz" -C "/var/log" "$APP_ID/"
-
-# Sauvegarde du code source
-ynh_log_info "Sauvegarde du code source"
-tar -czf "$APP_BACKUP_DIR/source.tar.gz" -C "$APP_DIR" source/
-
-# Création du fichier de métadonnées
-cat > "$APP_BACKUP_DIR/metadata.json" << EOF
-{
-  "app_id": "$APP_ID",
-  "app_version": "$(ynh_app_setting_get "$APP_ID" "app_version")",
-  "backup_date": "$(date -Iseconds)",
-  "backup_type": "full",
-  "database": {
-    "name": "$DB_NAME",
-    "type": "postgresql"
-  },
-  "redis": {
-    "db": "$REDIS_DB"
-  },
-  "files": {
-    "data": "data.tar.gz",
-    "config": "config.tar.gz",
-    "logs": "logs.tar.gz",
-    "source": "source.tar.gz"
-  }
-}
-EOF
-
-# Calcul de la taille totale de la sauvegarde
-BACKUP_SIZE=$(du -sh "$APP_BACKUP_DIR" | cut -f1)
-
-# Vérification de l'intégrité de la sauvegarde
-ynh_log_info "Vérification de l'intégrité de la sauvegarde"
-
-# Vérification des fichiers essentiels
-REQUIRED_FILES=("metadata.json" "data.tar.gz" "config.tar.gz")
-for file in "${REQUIRED_FILES[@]}"; do
-    if [ ! -f "$APP_BACKUP_DIR/$file" ]; then
-        ynh_log_error "Fichier de sauvegarde manquant : $file"
-        exit 1
-    fi
-done
-
-# Vérification de la base de données
-if [ -n "$DB_NAME" ] && [ ! -f "$APP_BACKUP_DIR/database.sql.gz" ]; then
-    ynh_log_error "Sauvegarde de la base de données manquante"
-    exit 1
-fi
-
-# Vérification de Redis
-if [ -n "$REDIS_DB" ] && [ ! -f "$APP_BACKUP_DIR/redis.rdb" ]; then
-    ynh_log_error "Sauvegarde Redis manquante"
-    exit 1
-fi
-
-# Log de la sauvegarde
-ynh_log_info "Sauvegarde de $APP_ID terminée avec succès"
-ynh_log_info "Taille de la sauvegarde : $BACKUP_SIZE"
-ynh_log_info "Emplacement : $APP_BACKUP_DIR"
-
-# Message de fin
-echo "✅ Sauvegarde de $APP_ID terminée avec succès !"
-echo "📦 Taille : $BACKUP_SIZE"
-echo "📁 Emplacement : $APP_BACKUP_DIR"
-echo "🗄️  Base de données : $(if [ -n "$DB_NAME" ]; then echo "✅"; else echo "❌"; fi)"
-echo "🔴 Redis : $(if [ -n "$REDIS_DB" ]; then echo "✅"; else echo "❌"; fi)"
-echo "📄 Fichiers : ✅"
-echo "⚙️  Configuration : ✅"
+ynh_print_info "Backup terminé pour $app."

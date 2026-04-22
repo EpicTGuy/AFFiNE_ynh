@@ -1,0 +1,19 @@
+#!/bin/bash
+source /usr/share/yunohost/helpers
+
+ynh_script_progression --message="Updating NGINX configuration..." --weight=1
+ynh_config_change_url_nginx
+
+ynh_script_progression --message="Reconfiguring AFFiNE..." --weight=1
+ynh_config_add --template="app.env" --destination="$install_dir/app/.env"
+chmod 600 "$install_dir/app/.env"
+chown "$app:$app" "$install_dir/app/.env"
+
+ynh_script_progression --message="Restarting AFFiNE..." --weight=5
+ynh_systemctl \
+    --service="$app" \
+    --action="restart" \
+    --log_path="/var/log/$app/$app.log" \
+    --wait_until="Listening on"
+
+ynh_script_progression --message="URL change completed" --last

@@ -1,0 +1,52 @@
+#!/bin/bash
+source _common.sh
+source /usr/share/yunohost/helpers
+
+ynh_script_progression --message="Deploying source files..." --weight=10
+# TEST TEMPORAIRE — À RETIRER AVANT PR yunohost
+cp "$YNH_APP_BASEDIR/conf/docker-image-extract" \
+   "$YNH_HELPERS_DIR/vendor/docker-image-extract/docker-image-extract"
+ynh_setup_source --dest_dir="$install_dir"
+
+ynh_script_progression --message="Enabling pgvector extension..." --weight=1
+sudo -u postgres psql --dbname="$db_name" --command="CREATE EXTENSION IF NOT EXISTS vector;"
+
+ynh_script_progression --message="Configuring AFFiNE..." --weight=1
+ynh_config_add --template="app.env" --destination="$install_dir/app/.env"
+chmod 600 "$install_dir/app/.env"
+chown "$app:$app" "$install_dir/app/.env"
+
+# Répertoires de données (remplacent /root/.affine de l'image Docker)
+mkdir -p "$data_dir/storage" "$data_dir/config"
+chown -R "$app:$app" "$data_dir"
+chown -R "$app:$app" "$install_dir"
+
+ynh_script_progression --message="Running database migration..." --weight=5
+pushd "$app_dir"
+# Prisma schema migrations (replaces 'yarn prisma migrate deploy')
+ynh_exec_as_app env HOME="$data_dir" \
+    "$nodejs_bin" node_modules/prisma/build/index.js migrate deploy
+# AFFiNE data migrations (replaces 'yarn cli run' = SERVER_FLAVOR=script node dist/main.js run)
+ynh_exec_as_app env HOME="$data_dir" SERVER_FLAVOR=script \
+    "$nodejs_bin" dist/main.js run
+popd
+
+ynh_script_progression --message="Configuring NGINX..." --weight=1
+ynh_config_add_nginx
+
+ynh_script_progression --message="Configuring systemd service..." --weight=1
+ynh_config_add_systemd
+mkdir -p "/var/log/$app"
+chown "$app:$app" "/var/log/$app"
+yunohost service add "$app" \
+    --description="AFFiNE knowledge base" \
+    --log="/var/log/$app/$app.log"
+
+ynh_script_progression --message="Starting AFFiNE..." --weight=10
+ynh_systemctl \
+    --service="$app" \
+    --action="start" \
+    --log_path="/var/log/$app/$app.log" \
+    --wait_until="Listening on"
+
+ynh_script_progression --message="Installation completed" --last

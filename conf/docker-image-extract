@@ -1,0 +1,434 @@
+#!/usr/bin/env bash
+#
+# This script pulls and extracts all files from an image in Docker Hub or any
+# OCI-compliant registry (ghcr.io, quay.io, registry.gitlab.com, etc.).
+#
+# Copyright (c) 2020-2023, Jeremy Lin
+# OCI multi-registry support: 2025, YunoHost contributors
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+PLATFORM_DEFAULT="linux/amd64"
+PLATFORM="${PLATFORM_DEFAULT}"
+OUT_DIR="./output"
+
+usage() {
+    echo "This script pulls and extracts all files from an image in Docker Hub or any OCI registry."
+    echo
+    echo "$0 [OPTIONS...] IMAGE[:REF]"
+    echo
+    echo "IMAGE can be:"
+    echo "  - A Docker Hub image: 'hello-world', 'some-user/some-image'"
+    echo "  - An OCI registry image: 'ghcr.io/user/image', 'quay.io/user/image'"
+    echo
+    echo "REF is either a tag name or a full SHA-256 image digest (with a 'sha256:' prefix)."
+    echo "The default ref is the 'latest' tag."
+    echo
+    echo "Options:"
+    echo
+    echo "  -p PLATFORM  Pull image for the specified platform (default: ${PLATFORM})"
+    echo "  -o OUT_DIR   Extract image to the specified output dir (default: ${OUT_DIR})"
+    echo "  -h           Show help with usage examples"
+}
+
+usage_detailed() {
+    usage
+    echo
+    echo "Examples:"
+    echo
+    echo "# Pull from Docker Hub."
+    echo "\$ $0 hello-world:latest"
+    echo
+    echo "# Pull from GitHub Container Registry."
+    echo "\$ $0 ghcr.io/user/image:latest"
+    echo
+    echo "# Pull for a specific platform."
+    echo "\$ $0 -p linux/arm64/v8 ghcr.io/user/image"
+    echo
+    echo "# Pull an image by digest."
+    echo "\$ $0 hello-world:sha256:90659bf80b44ce6be8234e6ff90a1ac34acbeb826903b02cfa0da11c82cbc042"
+}
+
+if [ $# -eq 0 ]; then
+    usage_detailed
+    exit 0
+fi
+
+while getopts ':ho:p:' opt; do
+    case $opt in
+        o)
+            OUT_DIR="${OPTARG}"
+            ;;
+        p)
+            PLATFORM="${OPTARG}"
+            ;;
+        h)
+            usage_detailed
+            exit 0
+            ;;
+        \?)
+            echo "ERROR: Invalid option '-$OPTARG'."
+            echo
+            usage
+            exit 1
+            ;;
+        \:) echo "ERROR: Argument required for option '-$OPTARG'."
+            echo
+            usage
+            exit 1
+            ;;
+    esac
+done
+shift $(($OPTIND - 1))
+
+if [ $# -eq 0 ]; then
+    echo "ERROR: Image to pull must be specified."
+    echo
+    usage
+    exit 1
+fi
+
+if [ -e "${OUT_DIR}" ]; then
+    if [ -d "${OUT_DIR}" ]; then
+        echo "WARNING: Output dir already exists. If it contains a previous extracted image,"
+        echo "there may be errors when trying to overwrite files with read-only permissions."
+        echo
+    else
+        echo "ERROR: Output dir already exists, but is not a directory."
+        exit 1
+    fi
+fi
+
+have_curl() {
+    command -v curl >/dev/null
+}
+
+have_wget() {
+    command -v wget >/dev/null
+}
+
+if ! have_curl && ! have_wget; then
+    echo "This script requires either curl or wget."
+    exit 1
+fi
+
+# Given a JSON input on stdin, extract the string value associated with the
+# specified key. This avoids an extra dependency on a tool like `jq`.
+extract() {
+    local key="$1"
+    grep -o "\"${key}\"[[:space:]]*:[[:space:]]*\"[^\"]\+\"" |
+    sed -e 's/"$//' -e 's/.*"//'
+}
+
+# Fetch a URL to stdout. Up to two header arguments may be specified:
+#
+#   fetch <url> [name1: value1] [name2: value2]
+#
+fetch() {
+    if have_curl; then
+        if [ $# -eq 2 ]; then
+            set -- -H "$2" "$1"
+        elif [ $# -eq 3 ]; then
+            set -- -H "$2" -H "$3" "$1"
+        fi
+        curl -sSL "$@"
+    else
+        if [ $# -eq 2 ]; then
+            set -- --header "$2" "$1"
+        elif [ $# -eq 3 ]; then
+            set -- --header "$2" --header "$3" "$1"
+        fi
+        wget -qO- "$@"
+    fi
+}
+
+# Fetch only the response headers for a URL (GET request, body discarded).
+# HEAD (-I) is avoided because some registries (e.g., ghcr.io) return 405 on HEAD.
+fetch_headers() {
+    local url="$1"
+    if have_curl; then
+        curl -sSL -D - -o /dev/null "${url}" 2>/dev/null
+    else
+        wget -qS -O /dev/null "${url}" 2>&1
+    fi
+}
+
+# ============================================================
+# REGISTRY DETECTION
+# ============================================================
+#
+# A registry prefix is detected when the first path component of the image
+# spec contains a dot (e.g., ghcr.io, quay.io, registry.gitlab.com).
+# Docker Hub shorthand images (hello-world, user/image) have no dot.
+
+image_spec="$1"
+_first_component="${image_spec%%/*}"
+_first_no_port="${_first_component%%:*}"
+
+if [ "${_first_component}" != "${image_spec}" ] && echo "${_first_no_port}" | grep -q '\.'; then
+    # Non-Docker Hub OCI registry (e.g., ghcr.io/user/image:tag)
+    registry="${_first_no_port}"
+    _rest="${image_spec#*/}"        # "user/image:tag"
+    image="${_rest%%:*}"            # "user/image"
+    _ref_candidate="${_rest#*:}"
+    if [ "${_ref_candidate}" = "${_rest}" ]; then
+        echo "Defaulting ref to tag 'latest'..."
+        ref="latest"
+    else
+        ref="${_ref_candidate}"
+    fi
+else
+    # Docker Hub
+    registry=""
+    image="${image_spec%%:*}"
+    if [ "${image#*/}" = "${image}" ]; then
+        # Docker official images are in the 'library' namespace.
+        image="library/${image}"
+    fi
+    ref="${image_spec#*:}"
+    if [ "${ref}" = "${image_spec}" ]; then
+        echo "Defaulting ref to tag 'latest'..."
+        ref=latest
+    fi
+fi
+
+# Split platform (OS/arch/variant) into separate variables.
+OLD_IFS="${IFS}"
+IFS=/ read -r OS ARCH VARIANT <<EOF
+${PLATFORM}
+EOF
+IFS="${OLD_IFS}"
+
+# ============================================================
+# SHARED: DOWNLOAD AND EXTRACT LAYERS
+# ============================================================
+
+extract_layers() {
+    local blobs_url="$1"
+    local auth_hdr="$2"
+    local layers="$3"
+
+    mkdir -p "${OUT_DIR}"
+
+    for layer in ${layers}; do
+        local hash="${layer#sha256:}"
+        echo "Fetching and extracting layer ${hash}..."
+        if [ -n "${auth_hdr}" ]; then
+            fetch "${blobs_url}/${layer}" "${auth_hdr}"
+        else
+            fetch "${blobs_url}/${layer}"
+        fi | gzip -d | tar -C "${OUT_DIR}" -xf -
+        # Handle "whiteout" files (deletions in this layer).
+        # Ref: https://github.com/moby/moby/blob/master/image/spec/v1.2.md#creating-an-image-filesystem-changeset
+        OLD_IFS="${IFS}"
+        find "${OUT_DIR}" -name '.wh.*' | while IFS= read -r f; do
+            dir="${f%/*}"
+            wh_file="${f##*/}"
+            file="${wh_file#.wh.}"
+            rm -rf "${dir}/${wh_file}" "${dir}/${file}"
+        done
+        IFS="${OLD_IFS}"
+    done
+
+    echo "Image contents extracted into ${OUT_DIR}."
+}
+
+# ============================================================
+# DOCKER HUB FLOW (original logic, unchanged)
+# ============================================================
+
+if [ -z "${registry}" ]; then
+
+    manifest_list_url="https://hub.docker.com/v2/repositories/${image}/tags/${ref}"
+
+    if [ -z "${ref##sha256:*}" ]; then
+        digest="${ref}"
+    else
+        echo "Getting multi-arch manifest list..."
+        NL='
+'
+        digest=$(fetch "${manifest_list_url}" |
+            sed -e 's/\([][{}]\)/\'"${NL}"'\1\'"${NL}"'/g' |
+            sed -n '/"images":/,/]/ p' |
+            grep architecture |
+            while read -r image_entry; do
+                arch="$(echo ${image_entry} | extract 'architecture')"
+                if [ "${arch}" != "${ARCH}" ]; then continue; fi
+
+                os="$(echo ${image_entry} | extract 'os')"
+                if [ "${os}" != "${OS}" ]; then continue; fi
+
+                variant="$(echo ${image_entry} | extract 'variant')"
+                if [ "${variant}" = "${VARIANT}" ]; then
+                    echo ${image_entry} | extract 'digest'
+                    break
+                fi
+            done)
+
+        if [ -n "${digest}" ]; then
+            echo "Platform ${PLATFORM} resolved to '${digest}'..."
+        else
+            echo "No image digest found. Verify that the image, ref, and platform are valid."
+            exit 1
+        fi
+    fi
+
+    api_token_url="https://auth.docker.io/token?service=registry.docker.io&scope=repository:${image}:pull"
+    manifest_url="https://registry-1.docker.io/v2/${image}/manifests/${digest}"
+    blobs_base_url="https://registry-1.docker.io/v2/${image}/blobs"
+
+    echo "Getting API token..."
+    token=$(fetch "${api_token_url}" | extract 'token')
+    auth_header="Authorization: Bearer ${token}"
+
+    docker_manifest_v2="application/vnd.docker.distribution.manifest.v2+json"
+    oci_manifest_v1="application/vnd.oci.image.manifest.v1+json"
+    accept_header="Accept: ${docker_manifest_v2},${oci_manifest_v1}"
+
+    echo "Getting image manifest for ${image}:${ref}..."
+    layers=$(fetch "${manifest_url}" "${auth_header}" "${accept_header}" |
+                 sed -n '/"layers":/,$ p' |
+                 extract 'digest')
+
+    if [ -z "${layers}" ]; then
+        echo "No layers returned. Verify that the image and ref are valid."
+        exit 1
+    fi
+
+    extract_layers "${blobs_base_url}" "${auth_header}" "${layers}"
+
+# ============================================================
+# OCI REGISTRY FLOW (dynamic auth via WWW-Authenticate)
+# ============================================================
+
+else
+
+    # 1. Discover auth endpoint from the WWW-Authenticate header on /v2/
+    echo "Probing registry ${registry} for auth endpoint..."
+    www_auth=$(fetch_headers "https://${registry}/v2/" | grep -i "www-authenticate" | head -1)
+
+    auth_realm=$(echo "${www_auth}" | grep -o 'realm="[^"]*"' | sed 's/realm="//;s/"$//')
+    auth_service=$(echo "${www_auth}" | grep -o 'service="[^"]*"' | sed 's/service="//;s/"$//')
+
+    # 2. Acquire token (or proceed without auth if the registry is fully public)
+    auth_header=""
+    if [ -z "${auth_realm}" ]; then
+        echo "Registry ${registry} returned no WWW-Authenticate — proceeding without auth."
+    else
+        echo "Auth endpoint: ${auth_realm} (service: ${auth_service})"
+        echo "Getting API token..."
+        token_url="${auth_realm}?service=${auth_service}&scope=repository:${image}:pull"
+        token=$(fetch "${token_url}" | extract 'token')
+
+        # Some registries use "access_token" instead of "token" (RFC 6749 naming)
+        if [ -z "${token}" ]; then
+            token=$(fetch "${token_url}" | extract 'access_token')
+        fi
+
+        if [ -z "${token}" ]; then
+            echo "ERROR: Could not acquire auth token from ${auth_realm}."
+            exit 1
+        fi
+
+        auth_header="Authorization: Bearer ${token}"
+    fi
+
+    # 3. Fetch manifest — accept both index (multi-arch) and single manifest formats
+    oci_index="application/vnd.oci.image.index.v1+json"
+    docker_list="application/vnd.docker.distribution.manifest.list.v2+json"
+    oci_manifest="application/vnd.oci.image.manifest.v1+json"
+    docker_manifest_v2="application/vnd.docker.distribution.manifest.v2+json"
+    accept_all="Accept: ${oci_index},${docker_list},${oci_manifest},${docker_manifest_v2}"
+
+    manifests_base_url="https://${registry}/v2/${image}/manifests"
+    blobs_base_url="https://${registry}/v2/${image}/blobs"
+
+    echo "Getting manifest for ${image}:${ref}..."
+    if [ -n "${auth_header}" ]; then
+        manifest_response=$(fetch "${manifests_base_url}/${ref}" "${auth_header}" "${accept_all}")
+    else
+        manifest_response=$(fetch "${manifests_base_url}/${ref}" "${accept_all}")
+    fi
+
+    media_type=$(echo "${manifest_response}" | extract 'mediaType' | head -1)
+
+    # 4. If manifest list/index: resolve to platform-specific digest
+    if [ "${media_type}" = "application/vnd.oci.image.index.v1+json" ] || \
+       [ "${media_type}" = "application/vnd.docker.distribution.manifest.list.v2+json" ]; then
+
+        echo "Manifest is a multi-arch index. Resolving platform ${PLATFORM}..."
+
+        # Strategy: split compact JSON array on "},{"  to get one manifest entry per line,
+        # then match architecture + os (+ optional variant) to find the right digest.
+        digest=$(echo "${manifest_response}" |
+            tr -d '[:space:]' |
+            grep -o '"manifests":\[.*\]' |
+            sed 's/"manifests":\[//' | sed 's/\]$//' |
+            sed 's/},{/\n{/g' |
+            while IFS= read -r entry; do
+                arch=$(echo "${entry}" | extract 'architecture')
+                [ "${arch}" = "${ARCH}" ] || continue
+
+                os_val=$(echo "${entry}" | extract 'os')
+                [ "${os_val}" = "${OS}" ] || continue
+
+                if [ -n "${VARIANT}" ]; then
+                    variant_val=$(echo "${entry}" | extract 'variant')
+                    [ "${variant_val}" = "${VARIANT}" ] || continue
+                fi
+
+                echo "${entry}" | extract 'digest'
+                break
+            done)
+
+        if [ -z "${digest}" ]; then
+            echo "ERROR: No manifest found for platform ${PLATFORM} in the index."
+            echo "       Check that the image supports this platform."
+            exit 1
+        fi
+
+        echo "Platform ${PLATFORM} resolved to '${digest}'..."
+
+        # 5. Fetch the platform-specific single manifest
+        echo "Getting image manifest for ${image}@${digest}..."
+        accept_single="Accept: ${oci_manifest},${docker_manifest_v2}"
+        if [ -n "${auth_header}" ]; then
+            layers=$(fetch "${manifests_base_url}/${digest}" "${auth_header}" "${accept_single}" |
+                sed -n '/"layers":/,$ p' | extract 'digest')
+        else
+            layers=$(fetch "${manifests_base_url}/${digest}" "${accept_single}" |
+                sed -n '/"layers":/,$ p' | extract 'digest')
+        fi
+
+    else
+        # Single-arch manifest — extract layers directly
+        echo "Manifest is a single-arch image."
+        layers=$(echo "${manifest_response}" |
+            sed -n '/"layers":/,$ p' |
+            extract 'digest')
+    fi
+
+    if [ -z "${layers}" ]; then
+        echo "ERROR: No layers returned. Verify that the image and ref are valid."
+        exit 1
+    fi
+
+    extract_layers "${blobs_base_url}" "${auth_header}" "${layers}"
+
+fi

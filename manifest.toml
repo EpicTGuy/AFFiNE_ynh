@@ -1,0 +1,75 @@
+packaging_format = 2
+id = "affine"
+name = "AFFiNE"
+description.en = "Privacy-focused, local-first, open-source knowledge base combining notes, docs and whiteboards"
+description.fr = "Base de connaissances open source alliant notes, docs et tableaux blancs, axée sur la confidentialité"
+
+version = "0.26.3~ynh1"
+
+maintainers = []
+
+[upstream]
+license = "MIT"
+website = "https://affine.pro"
+code = "https://github.com/toeverything/AFFiNE"
+admindoc = "https://docs.affine.pro/self-host-affine"
+
+[integration]
+yunohost = ">= 11.2"
+helpers_version = "2.1"
+architectures = ["amd64", "arm64"]
+multi_instance = false
+ldap = false
+sso = false
+disk = "2G"
+ram.build = "512M"
+ram.runtime = "1G"
+
+[install]
+
+    [install.domain]
+    type = "domain"
+
+    [install.init_main_permission]
+    type = "group"
+    default = "visitors"
+
+    [install.admin]
+    type = "user"
+
+[resources]
+
+    [resources.sources.main]
+    format = "docker"
+    prefetch = false
+    amd64.url = "ghcr.io/toeverything/affine:0.26.3"
+    amd64.sha256 = "0a082ab0b929139a34a6eb9d422ad107290bdf3fc2fc644036161f0d9f0ce239"
+    arm64.url = "ghcr.io/toeverything/affine:0.26.3"
+    arm64.sha256 = "4ee575a418c89f680f3c78f5549dc85868716f8ee77e151d59bbba823091667a"
+    autoupdate.strategy = "latest_github_tag"
+    autoupdate.upstream = "https://github.com/toeverything/AFFiNE"
+
+    [resources.system_user]
+
+    [resources.install_dir]
+    # Défaut YunoHost : /var/www/affine
+    # Après extraction Docker : /var/www/affine/app/ et /var/www/affine/usr/
+
+    [resources.data_dir]
+    subdirs = ["storage", "config"]
+
+    [resources.permissions]
+    main.url = "/"
+    main.auth_header = false
+
+    [resources.ports]
+    main.default = 3010
+
+    [resources.apt]
+    packages = ["redis-server", "postgresql"]
+    extras.pgdg.repo = "deb https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main"
+    extras.pgdg.key = "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
+    extras.pgdg.packages = ["postgresql-15-pgvector"]
+
+    [resources.database]
+    type = "postgresql"

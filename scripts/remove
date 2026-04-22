@@ -1,0 +1,10 @@
+#!/bin/bash
+source /usr/share/yunohost/helpers
+
+ynh_script_progression --message="Stopping and removing service..." --weight=2
+ynh_systemctl --service="$app" --action=stop
+yunohost service remove "$app"
+ynh_config_remove_systemd
+ynh_config_remove_nginx
+
+ynh_script_progression --message="Removal completed" --last

@@ -3,7 +3,8 @@ source _common.sh
 source /usr/share/yunohost/helpers
 
 ynh_script_progression --message="Deploying source files..." --weight=10
-# TEST TEMPORAIRE — À RETIRER AVANT PR yunohost
+# Workaround: replace vendored script until YunoHost/yunohost#2293 is merged
+# (adds OCI multi-registry support required for ghcr.io images)
 cp "$YNH_APP_BASEDIR/conf/docker-image-extract" \
    "$YNH_HELPERS_DIR/vendor/docker-image-extract/docker-image-extract"
 ynh_setup_source --dest_dir="$install_dir"

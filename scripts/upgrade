@@ -6,6 +6,10 @@ ynh_script_progression --message="Stopping service..." --weight=1
 ynh_systemctl --service="$app" --action="stop"
 
 ynh_script_progression --message="Upgrading source files..." --weight=10
+# Workaround: replace vendored script until YunoHost/yunohost#2293 is merged
+# (adds OCI multi-registry support required for ghcr.io images)
+cp "$YNH_APP_BASEDIR/conf/docker-image-extract" \
+   "$YNH_HELPERS_DIR/vendor/docker-image-extract/docker-image-extract"
 ynh_setup_source --dest_dir="$install_dir" --keep="app/.env"
 
 chown -R "$app:$app" "$install_dir"

@@ -7,7 +7,7 @@ AFFiNE is a next-generation knowledge base that brings together notes, documents
 - **Real-time collaboration**: multiple users can edit the same workspace simultaneously
 - **Offline-first**: your data is always available, even without internet access; sync happens when reconnected
 - **Self-hostable**: full control over your data with the official self-hosted server
-- **Open source**: MIT-licensed, community-driven development
+- **Open source**: community-driven development (MPL-2.0)
 
 AFFiNE replaces a combination of tools like Notion (documents), Miro (whiteboards), and Obsidian (local notes) with a single integrated experience. It stores data in a structured binary format (CRDT-based), enabling efficient merging of concurrent edits.
 

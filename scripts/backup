@@ -6,6 +6,5 @@ ynh_backup "$install_dir"
 ynh_backup "$data_dir"
 ynh_backup "/etc/nginx/conf.d/$domain.d/$app.conf"
 ynh_backup "/etc/systemd/system/$app.service"
-# La base de données est sauvegardée automatiquement par la resource database
 
 ynh_print_info --message="Backup declarations done"

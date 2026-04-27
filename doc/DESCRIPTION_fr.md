@@ -7,7 +7,7 @@ AFFiNE est une base de connaissances nouvelle génération qui réunit notes, do
 - **Collaboration temps réel** : plusieurs utilisateurs peuvent éditer le même espace simultanément
 - **Offline-first** : vos données sont toujours disponibles, même sans internet ; la synchronisation se fait à la reconnexion
 - **Auto-hébergeable** : contrôle total sur vos données avec le serveur officiel self-hosted
-- **Open source** : licence MIT, développement piloté par la communauté
+- **Open source** : développement piloté par la communauté (MPL-2.0)
 
 AFFiNE remplace une combinaison d'outils comme Notion (documents), Miro (tableaux blancs) et Obsidian (notes locales) par une expérience intégrée unique. Elle stocke les données dans un format binaire structuré (basé sur les CRDT), permettant la fusion efficace des modifications concurrentes.
 

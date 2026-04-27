@@ -9,7 +9,7 @@ version = "0.26.3~ynh1"
 maintainers = []
 
 [upstream]
-license = "MIT"
+license = "MPL-2.0"
 website = "https://affine.pro"
 code = "https://github.com/toeverything/AFFiNE"
 admindoc = "https://docs.affine.pro/self-host-affine"

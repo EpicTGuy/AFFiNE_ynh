@@ -17,17 +17,14 @@ ynh_config_add --template="app.env" --destination="$install_dir/app/.env"
 chmod 600 "$install_dir/app/.env"
 chown "$app:$app" "$install_dir/app/.env"
 
-# Répertoires de données (remplacent /root/.affine de l'image Docker)
 mkdir -p "$data_dir/storage" "$data_dir/config"
 chown -R "$app:$app" "$data_dir"
 chown -R "$app:$app" "$install_dir"
 
 ynh_script_progression --message="Running database migration..." --weight=5
 pushd "$app_dir"
-# Prisma schema migrations (replaces 'yarn prisma migrate deploy')
 ynh_exec_as_app env HOME="$data_dir" \
     "$nodejs_bin" node_modules/prisma/build/index.js migrate deploy
-# AFFiNE data migrations (replaces 'yarn cli run' = SERVER_FLAVOR=script node dist/main.js run)
 ynh_exec_as_app env HOME="$data_dir" SERVER_FLAVOR=script \
     "$nodejs_bin" dist/main.js run
 popd
